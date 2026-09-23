@@ -1,0 +1,205 @@
+import json
+from typing import Any
+
+from assistant.llm import create_client, get_model, provider_info
+from assistant.tools.memory_tools import get_memory_store
+from assistant.tools.registry import TOOL_DEFINITIONS, execute_tool
+
+BASE_SYSTEM_PROMPT = """You are Echo Mind, an advanced personal AI copilot for Nour's Windows computer.
+Your job is to understand what Nour wants and call the appropriate tool(s) to automate tasks, analyze data, research, and boost productivity. You do NOT execute shell commands directly — only use the provided tools.
+
+Guidelines:
+- Research: deep_web_research for fast multi-source web questions & facts without browser popups; compare_products_or_options for side-by-side reviews.
+- Documents: read_document (PDF, docx, txt, md, csv), summarize_document, search_documents_in_folder.
+- Data & Analytics: analyze_tabular_data for CSV/Excel datasets (stats, columns, head); generate_chart (bar, line, scatter, hist, pie).
+- System Diagnostics: system_resource_inspector (CPU, RAM, disk, heavy processes); clean_temp_files (free space); scaffold_code_project (fastapi, react, cli).
+- Agenda & Email: manage_todo (add, list, complete, delete); manage_calendar (add, list, delete); draft_email (professional, friendly, concise, assertive); get_daily_briefing (overview of day, agenda, tasks, PC status).
+- Files/folders: create_folder, create_file, open_folder, open_path, open_in_vscode, rename_path, list_directory.
+- Apps: open_application, close_application.
+- Browser automation (when visual browser is required): open_browser, navigate, search_google, search_youtube, click_element, type_into_field, get_page_content, close_browser.
+- Memory: save_preference, get_preference, save_project, get_project, list_projects.
+- Workflows: list_workflows, run_workflow (e.g. dev_environment).
+- Destructive deletes: call delete_path with confirm=false first, then confirm=true only after user approval.
+- Keep responses concise, organized with markdown bullets and tables when appropriate."""
+
+
+def build_system_prompt() -> str:
+    memory = get_memory_store().context_summary()
+    if memory:
+        return f"{BASE_SYSTEM_PROMPT}\n\n--- Saved memory ---\n{memory}"
+    return BASE_SYSTEM_PROMPT
+
+
+class AssistantAgent:
+    def __init__(self) -> None:
+        self.client = create_client()
+        self.model = get_model()
+        self.memory = get_memory_store()
+        self.messages: list[dict[str, Any]] = [
+            {"role": "system", "content": build_system_prompt()}
+        ]
+
+    def run(self, user_input: str) -> str:
+        """Process user input and return the assistant's response."""
+        # Always synchronize system prompt with latest saved memory
+        if self.messages and self.messages[0].get("role") == "system":
+            self.messages[0] = {"role": "system", "content": build_system_prompt()}
+        else:
+            self.messages.insert(0, {"role": "system", "content": build_system_prompt()})
+
+        # Trim conversation history if it gets too long (keep system prompt + last 20 messages)
+        if len(self.messages) > 25:
+            self.messages = [self.messages[0]] + self.messages[-20:]
+
+        self.memory.add_message("user", user_input)
+        self.messages.append({"role": "user", "content": user_input})
+
+        max_rounds = 8
+        current_round = 0
+
+        while current_round < max_rounds:
+            current_round += 1
+            try:
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=self.messages,
+                    tools=TOOL_DEFINITIONS,
+                    tool_choice="auto",
+                )
+            except Exception as exc:
+                err_msg = f"LLM error: {exc}"
+                self.memory.add_message("assistant", err_msg)
+                return err_msg
+
+            message = response.choices[0].message
+            assistant_message: dict[str, Any] = {
+                "role": "assistant",
+                "content": message.content,
+            }
+
+            if message.tool_calls:
+                assistant_message["tool_calls"] = [
+                    {
+                        "id": call.id,
+                        "type": "function",
+                        "function": {
+                            "name": call.function.name,
+                            "arguments": call.function.arguments,
+                        },
+                    }
+                    for call in message.tool_calls
+                ]
+
+            self.messages.append(assistant_message)
+
+            if not message.tool_calls:
+                reply = message.content or "Done."
+                self.memory.add_message("assistant", reply)
+                return reply
+
+            for call in message.tool_calls:
+                try:
+                    args = json.loads(call.function.arguments or "{}")
+                except json.JSONDecodeError as err:
+                    result = {"status": "error", "message": f"Malformed tool arguments JSON: {err}"}
+                else:
+                    result = execute_tool(call.function.name, args)
+
+                self.messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": call.id,
+                        "content": json.dumps(result),
+                    }
+                )
+
+        fallback_reply = "Reached maximum tool execution steps. Please narrow down your request."
+        self.memory.add_message("assistant", fallback_reply)
+        return fallback_reply
+
+    def run_stream(self, user_input: str):
+        """Process user input and stream response tokens in real-time."""
+        if self.messages and self.messages[0].get("role") == "system":
+            self.messages[0] = {"role": "system", "content": build_system_prompt()}
+        else:
+            self.messages.insert(0, {"role": "system", "content": build_system_prompt()})
+
+        if len(self.messages) > 25:
+            self.messages = [self.messages[0]] + self.messages[-20:]
+
+        self.memory.add_message("user", user_input)
+        self.messages.append({"role": "user", "content": user_input})
+
+        max_rounds = 8
+        current_round = 0
+
+        while current_round < max_rounds:
+            current_round += 1
+            try:
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=self.messages,
+                    tools=TOOL_DEFINITIONS,
+                    tool_choice="auto",
+                )
+            except Exception as exc:
+                err_msg = f"LLM error: {exc}"
+                self.memory.add_message("assistant", err_msg)
+                yield err_msg
+                return
+
+            message = response.choices[0].message
+            assistant_message: dict[str, Any] = {
+                "role": "assistant",
+                "content": message.content,
+            }
+
+            if message.tool_calls:
+                assistant_message["tool_calls"] = [
+                    {
+                        "id": call.id,
+                        "type": "function",
+                        "function": {
+                            "name": call.function.name,
+                            "arguments": call.function.arguments,
+                        },
+                    }
+                    for call in message.tool_calls
+                ]
+                self.messages.append(assistant_message)
+
+                for call in message.tool_calls:
+                    yield f"⚡ Running {call.function.name.replace('_', ' ')}...\n"
+                    try:
+                        args = json.loads(call.function.arguments or "{}")
+                    except json.JSONDecodeError as err:
+                        result = {"status": "error", "message": f"Malformed tool arguments JSON: {err}"}
+                    else:
+                        result = execute_tool(call.function.name, args)
+
+                    self.messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": call.id,
+                            "content": json.dumps(result),
+                        }
+                    )
+                continue
+
+            full_reply = message.content or "Done."
+            self.messages.append(assistant_message)
+            self.memory.add_message("assistant", full_reply)
+            yield full_reply
+            return
+
+        fallback_reply = "Reached maximum tool execution steps. Please narrow down your request."
+        self.memory.add_message("assistant", fallback_reply)
+        yield fallback_reply
+
+    def reset(self) -> None:
+        """Clear conversation history, keeping the system prompt."""
+        self.messages = [{"role": "system", "content": build_system_prompt()}]
+
+    @staticmethod
+    def provider_label() -> str:
+        return provider_info()
