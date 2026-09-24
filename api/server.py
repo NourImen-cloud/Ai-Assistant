@@ -1,6 +1,7 @@
 import json
 import sys
 import threading
+from typing import Any
 from pathlib import Path
 
 # Add project root to sys.path so 'assistant' package can be imported directly
@@ -145,11 +146,48 @@ def get_todos():
     return {"todos": todos}
 
 
+@app.post("/todos")
+def create_todo(data: dict[str, Any]):
+    """Create a new todo task."""
+    title = data.get("title", "").strip()
+    due_date = data.get("due_date", "").strip()
+    if not title:
+        return {"success": False, "error": "Title required"}
+    new_id = agent.memory.add_todo(title, due_date)
+    return {"success": True, "id": new_id}
+
+
+@app.delete("/todos/{todo_id}")
+def remove_todo(todo_id: int):
+    """Delete a todo task by ID."""
+    ok = agent.memory.delete_todo(todo_id)
+    return {"success": ok}
+
+
+@app.post("/todos/{todo_id}/toggle")
+def toggle_todo(todo_id: int):
+    """Toggle a todo status between pending and completed."""
+    with agent.memory._connect() as conn:
+        row = conn.execute("SELECT status FROM todos WHERE id = ?", (todo_id,)).fetchone()
+        if not row:
+            return {"success": False, "error": "Not found"}
+        new_status = "pending" if row["status"] == "completed" else "completed"
+        conn.execute("UPDATE todos SET status = ? WHERE id = ?", (new_status, todo_id))
+    return {"success": True, "status": new_status}
+
+
 @app.get("/events")
 def get_events():
     """Retrieve upcoming calendar events."""
     events = agent.memory.list_events(limit=15)
     return {"events": events}
+
+
+@app.delete("/events/{event_id}")
+def remove_event(event_id: int):
+    """Delete a calendar event by ID."""
+    ok = agent.memory.delete_event(event_id)
+    return {"success": ok}
 
 
 @app.get("/system/resources")

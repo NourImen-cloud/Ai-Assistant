@@ -7,6 +7,7 @@ from assistant.tools import (
     automation,
     browser,
     documents,
+    email_tools,
     files,
     memory_tools,
     research,
@@ -67,6 +68,11 @@ TOOL_HANDLERS: dict[str, ToolHandler] = {
     "manage_calendar": agenda.manage_calendar,
     "draft_email": agenda.draft_email,
     "get_daily_briefing": agenda.get_daily_briefing,
+    # Gmail Integration
+    "list_gmail_messages": email_tools.list_gmail_messages,
+    "read_gmail_message": email_tools.read_gmail_message,
+    "create_gmail_draft": email_tools.create_gmail_draft,
+    "send_gmail_message": email_tools.send_gmail_message,
 }
 
 LOCATION_HINT = "Location: desktop, documents, downloads, or absolute path."
@@ -823,6 +829,69 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "name": "get_daily_briefing",
             "description": "Get a morning briefing: pending tasks, agenda events, and PC health summary.",
             "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_gmail_messages",
+            "description": "List recent emails from Gmail inbox (sender, subject, date, message ID).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "folder": {"type": "string", "description": "Folder to check (default 'INBOX')."},
+                    "unread_only": {"type": "boolean", "description": "Only return unread emails (default true)."},
+                    "limit": {"type": "integer", "description": "Max number of emails to retrieve (default 5)."},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_gmail_message",
+            "description": "Read the full subject, sender, date, and body of a specific Gmail email by ID.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "message_id": {"type": "string", "description": "The email ID from list_gmail_messages."},
+                },
+                "required": ["message_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_gmail_draft",
+            "description": "Create a draft email or draft reply directly in Gmail Drafts (Brouillons) folder, so the user can review and click Send.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "recipient": {"type": "string", "description": "Recipient email address."},
+                    "subject": {"type": "string", "description": "Email subject line."},
+                    "body": {"type": "string", "description": "Email body content/response text."},
+                    "in_reply_to_msg_id": {"type": "string", "description": "Optional Message-ID header if this is a reply to an existing email."},
+                },
+                "required": ["recipient", "subject", "body"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "send_gmail_message",
+            "description": "Send an email immediately via Gmail SMTP (only when user explicitly requests immediate sending).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "recipient": {"type": "string", "description": "Recipient email address."},
+                    "subject": {"type": "string", "description": "Email subject line."},
+                    "body": {"type": "string", "description": "Email body content."},
+                },
+                "required": ["recipient", "subject", "body"],
+            },
         },
     },
 ]

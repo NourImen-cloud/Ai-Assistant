@@ -1334,3 +1334,25 @@ body {
   padding: 2rem 0;
 }
 
+.task-delete-btn {
+  background: transparent;
+  border: none;
+  color: #8b7ab8;
+  padding: 6px;
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  opacity: 0.6;
+}
+
+.task-delete-btn:hover {
+  background: rgba(239, 68, 68, 0.18);
+  color: #f87171;
+  opacity: 1;
+  transform: scale(1.1);
+}
+
+

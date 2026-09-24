@@ -31,3 +31,8 @@ API_PORT = int(os.getenv("API_PORT", "8000"))
 
 # Memory
 MEMORY_DB_PATH = DATA_DIR / "memory.db"
+
+# Gmail Integration (IMAP / SMTP)
+GMAIL_ADDRESS = os.getenv("GMAIL_ADDRESS", "").strip()
+GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD", "").strip()
+

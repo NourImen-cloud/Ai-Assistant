@@ -272,6 +272,35 @@ export default function App() {
       .catch(() => {});
   };
 
+  const toggleTodo = async (id) => {
+    try {
+      await fetch(`${API}/todos/${id}/toggle`, { method: "POST" });
+      fetchTodos();
+    } catch (e) {
+      console.error("Failed to toggle todo:", e);
+    }
+  };
+
+  const deleteTodo = async (id, e) => {
+    if (e) e.stopPropagation();
+    try {
+      await fetch(`${API}/todos/${id}`, { method: "DELETE" });
+      fetchTodos();
+    } catch (e) {
+      console.error("Failed to delete todo:", e);
+    }
+  };
+
+  const deleteEvent = async (id, e) => {
+    if (e) e.stopPropagation();
+    try {
+      await fetch(`${API}/events/${id}`, { method: "DELETE" });
+      fetchEvents();
+    } catch (e) {
+      console.error("Failed to delete event:", e);
+    }
+  };
+
   async function sendMessage(text) {
     const trimmed = text.trim();
     if (!trimmed || loading) return;
@@ -605,10 +634,10 @@ export default function App() {
                     <p>Live RAM, CPU, disk & temp cleanup</p>
                   </div>
 
-                  <div className="pillar-tile" onClick={() => handleQuickPrompt("Draft a professional email to my team about project milestones")}>
+                  <div className="pillar-tile" onClick={() => handleQuickPrompt("Check my Gmail inbox for unread emails and summarize them")}>
                     <div className="pillar-icon email-color"><MailIcon /></div>
-                    <h4>Draft Email</h4>
-                    <p>Polished business communications</p>
+                    <h4>Gmail & Drafts</h4>
+                    <p>Read inbox & auto-draft replies</p>
                   </div>
 
                   <div className="pillar-tile" onClick={() => setActiveTab("agenda")}>
@@ -638,18 +667,25 @@ export default function App() {
                     ) : (
                       todos
                         .filter((t) => t.status === "pending")
-                        .slice(0, 4)
+                        .slice(0, 5)
                         .map((task) => (
                           <div key={task.id} className="task-preview-row">
                             <input
                               type="checkbox"
                               className="task-check"
-                              onChange={() => handleQuickPrompt(`Mark task #${task.id} as completed`)}
+                              onChange={() => toggleTodo(task.id)}
                             />
                             <div className="task-text-col">
                               <span className="task-title-text">{task.title}</span>
                               {task.due_date && <span className="task-due-tag">Due: {task.due_date}</span>}
                             </div>
+                            <button
+                              className="task-delete-btn"
+                              onClick={(e) => deleteTodo(task.id, e)}
+                              title="Delete task"
+                            >
+                              <TrashIcon />
+                            </button>
                           </div>
                         ))
                     )}
@@ -832,12 +868,19 @@ export default function App() {
                           <input
                             type="checkbox"
                             checked={t.status === "completed"}
-                            onChange={() => handleQuickPrompt(t.status === "completed" ? `Task #${t.id} is already completed` : `Complete task #${t.id}`)}
+                            onChange={() => toggleTodo(t.id)}
                           />
                           <div className="agenda-item-info">
                             <h4 className="agenda-item-title">{t.title}</h4>
                             <span className="agenda-item-meta">{t.due_date ? `Due: ${t.due_date} • ` : ""}Created: {t.created_at.slice(0, 10)}</span>
                           </div>
+                          <button
+                            className="task-delete-btn"
+                            onClick={(e) => deleteTodo(t.id, e)}
+                            title="Delete task"
+                          >
+                            <TrashIcon />
+                          </button>
                         </div>
                       ))
                     )}
@@ -866,6 +909,13 @@ export default function App() {
                             <h4 className="agenda-item-title">{e.title}</h4>
                             {e.notes && <p className="agenda-item-notes">{e.notes}</p>}
                           </div>
+                          <button
+                            className="task-delete-btn"
+                            onClick={(e) => deleteEvent(e.id, e)}
+                            title="Delete event"
+                          >
+                            <TrashIcon />
+                          </button>
                         </div>
                       ))
                     )}

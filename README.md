@@ -96,6 +96,7 @@ AIassistant/
 │   │   ├── automation.py     # PyAutoGUI mouse/keyboard control & screenshots
 │   │   ├── browser.py        # Playwright headless/visual browser automation
 │   │   ├── documents.py      # PDF, DOCX, text reading, summarization & search
+│   │   ├── email_tools.py    # Gmail IMAP/SMTP reader, direct draft saver & sender
 │   │   ├── files.py          # File system management with confirmation safeguards
 │   │   ├── memory_tools.py   # Memory CRUD operations
 │   │   ├── paths.py          # Path security and resolution
@@ -165,6 +166,11 @@ OLLAMA_MODEL=llama3.1:8b
 # API server
 API_HOST=127.0.0.1
 API_PORT=8000
+
+# Gmail Integration (Direct inbox reading & automatic drafts)
+# Generate a 16-character App Password at: https://myaccount.google.com/apppasswords
+GMAIL_ADDRESS=your.email@gmail.com
+GMAIL_APP_PASSWORD=abcdefghijklmnop
 ```
 
 ---
