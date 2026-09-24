@@ -59,6 +59,7 @@ TOOL_HANDLERS: dict[str, ToolHandler] = {
     "search_documents_in_folder": documents.search_documents_in_folder,
     "deep_web_research": research.deep_web_research,
     "compare_products_or_options": research.compare_products_or_options,
+    "academic_search": research.academic_search,
     "analyze_tabular_data": analytics.analyze_tabular_data,
     "generate_chart": analytics.generate_chart,
     "system_resource_inspector": system_tools.system_resource_inspector,
@@ -695,6 +696,25 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                 "type": "object",
                 "properties": {
                     "query": {"type": "string", "description": "What to compare (e.g. 'RTX 4070 vs RX 7800 XT')."},
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "academic_search",
+            "description": (
+                "Search for academic papers, research articles, and scholarly publications on a topic. "
+                "Uses headless web search biased toward arxiv, Google Scholar, Semantic Scholar, PubMed, IEEE, and ACM. "
+                "No browser window is opened. Use this for research papers, academic summaries, and state-of-the-art findings."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Research topic or paper search query."},
+                    "max_sources": {"type": "integer", "description": "Number of papers to find, default 5."},
                 },
                 "required": ["query"],
             },
