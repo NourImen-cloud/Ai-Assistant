@@ -930,3 +930,181 @@ def execute_tool(name: str, arguments: dict[str, Any]) -> dict[str, str]:
         return handler(**clean_args)
     except TypeError as exc:
         return {"status": "error", "message": f"Invalid arguments for {name}: {exc}"}
+
+
+# ---------------------------------------------------------------------------
+# Dynamic Tool Selection (reduces token footprint to fit within 8K TPM limits)
+# ---------------------------------------------------------------------------
+
+TOOL_MAP: dict[str, dict[str, Any]] = {
+    t["function"]["name"]: t for t in TOOL_DEFINITIONS
+}
+
+TOOL_CATEGORIES: dict[str, list[str]] = {
+    "research": [
+        "deep_web_research",
+        "academic_search",
+        "compare_products_or_options",
+        "read_document",
+        "summarize_document",
+    ],
+    "documents": [
+        "read_document",
+        "summarize_document",
+        "search_documents_in_folder",
+        "create_file",
+        "open_path",
+        "list_directory",
+    ],
+    "data": [
+        "analyze_tabular_data",
+        "generate_chart",
+        "read_document",
+    ],
+    "system": [
+        "system_resource_inspector",
+        "clean_temp_files",
+        "scaffold_code_project",
+    ],
+    "agenda": [
+        "manage_todo",
+        "manage_calendar",
+        "draft_email",
+        "get_daily_briefing",
+    ],
+    "gmail": [
+        "list_gmail_messages",
+        "read_gmail_message",
+        "create_gmail_draft",
+        "send_gmail_message",
+        "draft_email",
+    ],
+    "files": [
+        "create_folder",
+        "create_file",
+        "open_folder",
+        "open_path",
+        "open_in_vscode",
+        "rename_path",
+        "list_directory",
+        "delete_path",
+    ],
+    "apps": [
+        "open_application",
+        "close_application",
+        "open_website",
+        "open_website_in_chrome",
+    ],
+    "browser": [
+        "open_browser",
+        "navigate",
+        "search_google",
+        "search_youtube",
+        "click_element",
+        "type_into_field",
+        "get_page_content",
+        "close_browser",
+    ],
+    "automation": [
+        "type_text",
+        "press_hotkey",
+        "move_mouse",
+        "click",
+        "take_screenshot",
+        "get_screen_size",
+    ],
+    "memory": [
+        "save_preference",
+        "get_preference",
+        "list_preferences",
+        "save_project",
+        "get_project",
+        "list_projects",
+        "list_workflows",
+        "run_workflow",
+    ],
+}
+
+CATEGORY_KEYWORDS: dict[str, list[str]] = {
+    "research": [
+        "research", "search", "paper", "article", "arxiv", "scholar", "quantum",
+        "find", "web", "compare", "cherch", "recherch", "trouv", "synth", "résum", "resum"
+    ],
+    "documents": [
+        "document", "pdf", "docx", "doc", "summar", "read", "folder", "résumé", "resume", "lire"
+    ],
+    "data": [
+        "data", "csv", "excel", "chart", "graph", "plot", "statistic", "donnée", "donnee", "tableau"
+    ],
+    "system": [
+        "system", "cpu", "ram", "disk", "memory", "temp", "clean", "scaffold", "process", "nettoy"
+    ],
+    "agenda": [
+        "todo", "task", "calendar", "event", "meeting", "briefing", "tâche", "tache", "agenda", "rendez-vous"
+    ],
+    "gmail": [
+        "gmail", "mail", "email", "inbox", "draft", "message", "courrier", "brouillon", "envoyer"
+    ],
+    "files": [
+        "file", "folder", "directory", "path", "create", "delete", "rename", "vscode", "dossier", "fichier"
+    ],
+    "apps": [
+        "open", "close", "launch", "app", "chrome", "calc", "terminal", "ouvr", "ferm", "lanc"
+    ],
+    "browser": [
+        "browser", "youtube", "navigate", "click", "type", "webpage", "navigateur"
+    ],
+    "automation": [
+        "mouse", "click", "screenshot", "hotkey", "keyboard", "screen", "souris", "clavier", "capture"
+    ],
+    "memory": [
+        "preference", "project", "workflow", "save", "remember", "projet", "sauvegard"
+    ],
+}
+
+CORE_TOOLS = [
+    "open_application",
+    "open_website",
+    "deep_web_research",
+    "get_daily_briefing",
+    "manage_todo",
+    "open_path",
+    "list_directory",
+    "get_preference",
+]
+
+
+def get_tools_for_request(query: str = "", messages: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+    """Select a focused subset of tools matching user intent and recent context.
+
+    Keeps the total schema size small (< 1,500 tokens) so requests fit comfortably
+    within strict provider rate limits (such as Groq's 8000 TPM limit).
+    """
+    text = (query or "").lower()
+    if messages:
+        for m in messages[-2:]:
+            c = m.get("content")
+            if isinstance(c, str):
+                text += " " + c.lower()
+            for tc in m.get("tool_calls", []):
+                fn = tc.get("function", {}).get("name")
+                if fn and fn in TOOL_MAP:
+                    text += " " + fn
+
+    selected: set[str] = set(CORE_TOOLS)
+
+    for cat, keywords in CATEGORY_KEYWORDS.items():
+        if any(kw in text for kw in keywords):
+            for t_name in TOOL_CATEGORIES[cat]:
+                selected.add(t_name)
+
+    # Always ensure any tool that was actively called in messages is present
+    if messages:
+        for m in messages:
+            for tc in m.get("tool_calls", []):
+                fn = tc.get("function", {}).get("name")
+                if fn:
+                    selected.add(fn)
+
+    return [TOOL_MAP[name] for name in selected if name in TOOL_MAP]
+

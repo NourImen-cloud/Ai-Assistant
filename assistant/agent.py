@@ -3,7 +3,32 @@ from typing import Any
 
 from assistant.llm import create_client, get_model, provider_info
 from assistant.tools.memory_tools import get_memory_store
-from assistant.tools.registry import TOOL_DEFINITIONS, execute_tool
+from assistant.tools.registry import TOOL_DEFINITIONS, execute_tool, get_tools_for_request
+
+
+def prune_old_tool_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Prune large tool outputs from older conversation turns to stay under token limits."""
+    last_user_idx = -1
+    for i in range(len(messages) - 1, -1, -1):
+        if messages[i].get("role") == "user":
+            last_user_idx = i
+            break
+
+    if last_user_idx <= 0:
+        return messages
+
+    pruned = []
+    for i, msg in enumerate(messages):
+        if i < last_user_idx and msg.get("role") == "tool":
+            content = msg.get("content", "")
+            if len(content) > 250:
+                copy_msg = dict(msg)
+                copy_msg["content"] = content[:200] + "... [earlier tool output truncated]"
+                pruned.append(copy_msg)
+                continue
+        pruned.append(msg)
+    return pruned
+
 
 BASE_SYSTEM_PROMPT = """You are Echo Mind, an advanced personal AI copilot for Nour's Windows computer.
 Your job is to understand what Nour wants and call the appropriate tool(s) to automate tasks, analyze data, research, and boost productivity. You do NOT execute shell commands directly — only use the provided tools.
@@ -64,6 +89,9 @@ class AssistantAgent:
             if msg.get("role") == "tool" and not msg.get("name"):
                 msg["name"] = "tool"
 
+        # Select focused tools for this intent to stay well under provider rate limits
+        active_tools = get_tools_for_request(user_input, self.messages)
+
         max_rounds = 8
         current_round = 0
 
@@ -72,8 +100,8 @@ class AssistantAgent:
             try:
                 response = self.client.chat.completions.create(
                     model=self.model,
-                    messages=self.messages,
-                    tools=TOOL_DEFINITIONS,
+                    messages=prune_old_tool_messages(self.messages),
+                    tools=active_tools,
                     tool_choice="auto",
                 )
             except Exception as exc:
@@ -148,6 +176,9 @@ class AssistantAgent:
             if msg.get("role") == "tool" and not msg.get("name"):
                 msg["name"] = "tool"
 
+        # Select focused tools for this intent to stay well under provider rate limits
+        active_tools = get_tools_for_request(user_input, self.messages)
+
         max_rounds = 8
         current_round = 0
 
@@ -156,8 +187,8 @@ class AssistantAgent:
             try:
                 response = self.client.chat.completions.create(
                     model=self.model,
-                    messages=self.messages,
-                    tools=TOOL_DEFINITIONS,
+                    messages=prune_old_tool_messages(self.messages),
+                    tools=active_tools,
                     tool_choice="auto",
                 )
             except Exception as exc:
