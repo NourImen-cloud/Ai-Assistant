@@ -55,6 +55,11 @@ class AssistantAgent:
         self.memory.add_message("user", user_input)
         self.messages.append({"role": "user", "content": user_input})
 
+        # Ensure all tool messages in history have a name (required by Harmony / vLLM / Groq)
+        for msg in self.messages:
+            if msg.get("role") == "tool" and not msg.get("name"):
+                msg["name"] = "tool"
+
         max_rounds = 8
         current_round = 0
 
@@ -70,6 +75,8 @@ class AssistantAgent:
             except Exception as exc:
                 err_msg = f"LLM error: {exc}"
                 self.memory.add_message("assistant", err_msg)
+                while len(self.messages) > 1 and self.messages[-1].get("role") in ("tool", "assistant"):
+                    self.messages.pop()
                 return err_msg
 
             message = response.choices[0].message
@@ -110,6 +117,7 @@ class AssistantAgent:
                     {
                         "role": "tool",
                         "tool_call_id": call.id,
+                        "name": call.function.name,
                         "content": json.dumps(result),
                     }
                 )
@@ -131,6 +139,11 @@ class AssistantAgent:
         self.memory.add_message("user", user_input)
         self.messages.append({"role": "user", "content": user_input})
 
+        # Ensure all tool messages in history have a name (required by Harmony / vLLM / Groq)
+        for msg in self.messages:
+            if msg.get("role") == "tool" and not msg.get("name"):
+                msg["name"] = "tool"
+
         max_rounds = 8
         current_round = 0
 
@@ -146,6 +159,8 @@ class AssistantAgent:
             except Exception as exc:
                 err_msg = f"LLM error: {exc}"
                 self.memory.add_message("assistant", err_msg)
+                while len(self.messages) > 1 and self.messages[-1].get("role") in ("tool", "assistant"):
+                    self.messages.pop()
                 yield err_msg
                 return
 
@@ -182,6 +197,7 @@ class AssistantAgent:
                         {
                             "role": "tool",
                             "tool_call_id": call.id,
+                            "name": call.function.name,
                             "content": json.dumps(result),
                         }
                     )
