@@ -203,6 +203,108 @@ def trigger_workflow(req: WorkflowRequest):
     return result
 
 
+class GmailConfigRequest(BaseModel):
+    gmail_address: str
+    gmail_app_password: str
+
+
+class GmailDraftRequest(BaseModel):
+    recipient: str
+    subject: str
+    body: str
+
+
+@app.get("/gmail/status")
+def get_gmail_status():
+    """Check whether Gmail is configured and test IMAP connection."""
+    from assistant.tools.email_tools import _connect_imap, _get_credentials
+
+    email_addr, app_pw = _get_credentials()
+    if not email_addr or not app_pw:
+        return {"configured": False, "email": "", "connected": False, "message": "Not configured"}
+
+    mail, err = _connect_imap()
+    if err:
+        return {"configured": True, "email": email_addr, "connected": False, "message": err}
+    try:
+        mail.logout()
+    except Exception:
+        pass
+    return {"configured": True, "email": email_addr, "connected": True, "message": "Connected"}
+
+
+@app.post("/gmail/config")
+def set_gmail_config(req: GmailConfigRequest):
+    """Save user Gmail address and app password to environment and .env file."""
+    import os
+    from assistant.config import PROJECT_ROOT
+
+    clean_pw = req.gmail_app_password.strip().replace(" ", "")
+    clean_email = req.gmail_address.strip()
+    os.environ["GMAIL_ADDRESS"] = clean_email
+    os.environ["GMAIL_APP_PASSWORD"] = clean_pw
+
+    env_path = PROJECT_ROOT / ".env"
+    lines = []
+    if env_path.exists():
+        lines = env_path.read_text(encoding="utf-8").splitlines()
+
+    updated_email = False
+    updated_pw = False
+    new_lines = []
+    for line in lines:
+        if line.startswith("GMAIL_ADDRESS="):
+            new_lines.append(f"GMAIL_ADDRESS={clean_email}")
+            updated_email = True
+        elif line.startswith("GMAIL_APP_PASSWORD="):
+            new_lines.append(f"GMAIL_APP_PASSWORD={clean_pw}")
+            updated_pw = True
+        else:
+            new_lines.append(line)
+
+    if not updated_email:
+        new_lines.append(f"GMAIL_ADDRESS={clean_email}")
+    if not updated_pw:
+        new_lines.append(f"GMAIL_APP_PASSWORD={clean_pw}")
+
+    env_path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+
+    from assistant.tools.email_tools import _connect_imap
+
+    mail, err = _connect_imap()
+    if err:
+        return {"success": False, "connected": False, "error": err}
+    try:
+        mail.logout()
+    except Exception:
+        pass
+    return {"success": True, "connected": True, "email": clean_email}
+
+
+@app.get("/gmail/messages")
+def get_gmail_messages(folder: str = "INBOX", limit: int = 10, unread_only: bool = False):
+    """Retrieve recent emails from inbox."""
+    from assistant.tools.email_tools import list_gmail_messages
+
+    return list_gmail_messages(folder=folder, unread_only=unread_only, limit=limit)
+
+
+@app.post("/gmail/draft")
+def make_gmail_draft(req: GmailDraftRequest):
+    """Create draft in Gmail."""
+    from assistant.tools.email_tools import create_gmail_draft
+
+    return create_gmail_draft(recipient=req.recipient, subject=req.subject, body=req.body)
+
+
+@app.post("/gmail/send")
+def send_gmail_direct(req: GmailDraftRequest):
+    """Send an email immediately."""
+    from assistant.tools.email_tools import send_gmail_message
+
+    return send_gmail_message(recipient=req.recipient, subject=req.subject, body=req.body)
+
+
 def main():
     import uvicorn
 

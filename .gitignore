@@ -1,4 +1,7 @@
 .env
+.env.*
+!.env.example
+.history/
 __pycache__/
 *.py[cod]
 *.egg-info/

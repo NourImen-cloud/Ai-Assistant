@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import "./App.css";
 
-const API = "http://127.0.0.1:8000";
+const API = import.meta.env.VITE_API_URL || "http://127.0.0.1:8001";
 
 // SVG Icons
 const ChatIcon = () => (
@@ -187,6 +187,20 @@ export default function App() {
   const [lastSpeech, setLastSpeech] = useState(
     "Fluid organic shapes dance across the canvas, conveying a sense of harmony in this abstract design."
   );
+
+  // Gmail Copilot State
+  const [gmailStatus, setGmailStatus] = useState({ configured: false, email: "", connected: false, message: "" });
+  const [gmailMessages, setGmailMessages] = useState([]);
+  const [gmailLoading, setGmailLoading] = useState(false);
+  const [gmailEmailInput, setGmailEmailInput] = useState("");
+  const [gmailPasswordInput, setGmailPasswordInput] = useState("");
+  const [gmailConfigStatus, setGmailConfigStatus] = useState("");
+  const [draftRecipient, setDraftRecipient] = useState("");
+  const [draftSubject, setDraftSubject] = useState("");
+  const [draftBody, setDraftBody] = useState("");
+  const [draftResult, setDraftResult] = useState("");
+  const [draftLoading, setDraftLoading] = useState(false);
+
   const bottomRef = useRef(null);
 
   useEffect(() => {
@@ -196,6 +210,7 @@ export default function App() {
     fetchTodos();
     fetchEvents();
     fetchSystem();
+    fetchGmailStatus();
 
     const interval = setInterval(fetchSystem, 15000);
     return () => clearInterval(interval);
@@ -207,9 +222,128 @@ export default function App() {
 
   const fetchHealth = () => {
     fetch(`${API}/health`)
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error("Health check failed");
+        return r.json();
+      })
       .then((d) => setProvider(d.provider || "Echo Mind Active"))
       .catch(() => setProvider("Backend Offline — Start: python api/server.py"));
+  };
+
+  const fetchGmailStatus = () => {
+    fetch(`${API}/gmail/status`)
+      .then((r) => r.json())
+      .then((d) => {
+        setGmailStatus(d);
+        if (d.email) setGmailEmailInput(d.email);
+      })
+      .catch(() => {});
+  };
+
+  const fetchGmailMessages = () => {
+    setGmailLoading(true);
+    fetch(`${API}/gmail/messages?limit=8`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.status === "success" && d.messages) {
+          setGmailMessages(d.messages);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setGmailLoading(false));
+  };
+
+  const saveGmailConfig = (e) => {
+    e.preventDefault();
+    if (!gmailEmailInput.trim() || !gmailPasswordInput.trim()) {
+      setGmailConfigStatus("❌ Please enter both email and App Password.");
+      return;
+    }
+    setGmailConfigStatus("Verifying connection to Gmail...");
+    fetch(`${API}/gmail/config`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        gmail_address: gmailEmailInput,
+        gmail_app_password: gmailPasswordInput,
+      }),
+    })
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.success) {
+          setGmailConfigStatus("✅ Connected successfully!");
+          fetchGmailStatus();
+          fetchGmailMessages();
+        } else {
+          setGmailConfigStatus(`❌ ${d.error || "Connection failed. Please check credentials."}`);
+        }
+      })
+      .catch((err) => setGmailConfigStatus(`❌ Error: ${err.message}`));
+  };
+
+  const handleCreateDraft = (e) => {
+    e.preventDefault();
+    if (!draftRecipient.trim() || !draftSubject.trim() || !draftBody.trim()) {
+      setDraftResult("❌ Please fill recipient, subject, and body.");
+      return;
+    }
+    setDraftLoading(true);
+    setDraftResult("Creating draft in Gmail...");
+    fetch(`${API}/gmail/draft`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        recipient: draftRecipient,
+        subject: draftSubject,
+        body: draftBody,
+      }),
+    })
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.status === "success") {
+          setDraftResult(`✅ ${d.message}`);
+          setDraftSubject("");
+          setDraftBody("");
+          setDraftRecipient("");
+        } else {
+          setDraftResult(`❌ ${d.message}`);
+        }
+      })
+      .catch((err) => setDraftResult(`❌ Error: ${err.message}`))
+      .finally(() => setDraftLoading(false));
+  };
+
+  const handleSendDirect = (e) => {
+    e.preventDefault();
+    if (!draftRecipient.trim() || !draftSubject.trim() || !draftBody.trim()) {
+      setDraftResult("❌ Please fill recipient, subject, and body.");
+      return;
+    }
+    if (!window.confirm(`Send email directly to ${draftRecipient}?`)) return;
+    setDraftLoading(true);
+    setDraftResult("Sending email via Gmail SMTP...");
+    fetch(`${API}/gmail/send`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        recipient: draftRecipient,
+        subject: draftSubject,
+        body: draftBody,
+      }),
+    })
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.status === "success") {
+          setDraftResult(`✅ ${d.message}`);
+          setDraftSubject("");
+          setDraftBody("");
+          setDraftRecipient("");
+        } else {
+          setDraftResult(`❌ ${d.message}`);
+        }
+      })
+      .catch((err) => setDraftResult(`❌ Error: ${err.message}`))
+      .finally(() => setDraftLoading(false));
   };
 
   const fetchHistory = () => {
@@ -373,6 +507,10 @@ export default function App() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ message: trimmed }),
         });
+        if (!fallbackRes.ok) {
+          const errData = await fallbackRes.json().catch(() => ({}));
+          throw new Error(errData.detail || `Server returned status ${fallbackRes.status}`);
+        }
         const fallbackData = await fallbackRes.json();
         const fallbackReply = fallbackData.reply || "Done.";
         setMessages((prev) => {
@@ -382,12 +520,12 @@ export default function App() {
         });
         setLastSpeech(fallbackReply);
         fetchHistory();
-      } catch {
+      } catch (err) {
         setMessages((prev) => {
           const next = [...prev];
           next[next.length - 1] = {
             role: "assistant",
-            content: "Could not reach backend. Run: python api/server.py",
+            content: `Backend error: ${err.message || "Could not reach backend. Run: python api/server.py"}`,
           };
           return next;
         });
@@ -525,6 +663,23 @@ export default function App() {
             <WorkflowIcon />
             <span>Workflows & Tools</span>
           </button>
+
+          <button
+            className={`nav-item ${activeTab === "email" ? "active" : ""}`}
+            onClick={() => {
+              setActiveTab("email");
+              fetchGmailStatus();
+              fetchGmailMessages();
+            }}
+          >
+            <MailIcon />
+            <span>Gmail Copilot</span>
+            {gmailStatus.configured && (
+              <span className="nav-counter" style={{ background: "#10b981", color: "#fff" }}>
+                ✓
+              </span>
+            )}
+          </button>
         </nav>
 
         {/* Sidebar Footer with Reset & Info */}
@@ -634,7 +789,7 @@ export default function App() {
                     <p>Live RAM, CPU, disk & temp cleanup</p>
                   </div>
 
-                  <div className="pillar-tile" onClick={() => handleQuickPrompt("Check my Gmail inbox for unread emails and summarize them")}>
+                  <div className="pillar-tile" onClick={() => { setActiveTab("email"); fetchGmailStatus(); fetchGmailMessages(); }}>
                     <div className="pillar-icon email-color"><MailIcon /></div>
                     <h4>Gmail & Drafts</h4>
                     <p>Read inbox & auto-draft replies</p>
@@ -948,6 +1103,230 @@ export default function App() {
                     </button>
                   </div>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {/* 6. GMAIL INBOX & COPILOT VIEW */}
+          {activeTab === "email" && (
+            <div className="gmail-studio-container">
+              {/* Connection Status Banner */}
+              <div className="gmail-status-card">
+                <div className="gmail-status-info">
+                  <div className="section-title-row" style={{ marginBottom: 0 }}>
+                    <h2>Gmail Inbox & AI Draft Copilot</h2>
+                  </div>
+                  <div className="gmail-status-hint">
+                    {gmailStatus.configured && gmailStatus.connected ? (
+                      <span className="gmail-status-badge gmail-badge-connected">
+                        ● Connected: {gmailStatus.email}
+                      </span>
+                    ) : (
+                      <span className="gmail-status-badge gmail-badge-offline">
+                        ● Not Connected
+                      </span>
+                    )}
+                    <span style={{ marginLeft: "8px" }}>
+                      Connect any standard Gmail account in 60 seconds (100% free).
+                    </span>
+                  </div>
+                </div>
+                <button
+                  className="gmail-btn-secondary"
+                  onClick={() => {
+                    fetchGmailStatus();
+                    fetchGmailMessages();
+                  }}
+                  title="Refresh Gmail connection and messages"
+                >
+                  🔄 Sync Gmail
+                </button>
+              </div>
+
+              {/* Main Two-Column Layout */}
+              <div className="gmail-grid-layout">
+                {/* Column 1: Inbox Reader */}
+                <div className="gmail-card-panel">
+                  <div className="gmail-panel-header">
+                    <div>
+                      <h3>Recent Inbox Emails</h3>
+                      <p className="section-subtitle">Read messages, summarize content, or generate AI replies</p>
+                    </div>
+                    <button
+                      className="gmail-btn-secondary"
+                      onClick={fetchGmailMessages}
+                      disabled={gmailLoading}
+                    >
+                      {gmailLoading ? "Loading..." : "Refresh Inbox"}
+                    </button>
+                  </div>
+
+                  <div className="gmail-messages-list">
+                    {gmailMessages.length === 0 ? (
+                      <div className="agenda-empty-text">
+                        {gmailLoading
+                          ? "Fetching emails from Gmail..."
+                          : gmailStatus.configured
+                          ? "No recent emails found in inbox. Click 'Refresh Inbox' to sync."
+                          : "Configure your Gmail credentials below to view your inbox."}
+                      </div>
+                    ) : (
+                      gmailMessages.map((msg) => (
+                        <div key={msg.id} className="gmail-message-item">
+                          <div className="gmail-msg-top">
+                            <span className="gmail-msg-from">{msg.from}</span>
+                            <span>{msg.date ? new Date(msg.date).toLocaleDateString() : ""}</span>
+                          </div>
+                          <div className="gmail-msg-subject">{msg.subject}</div>
+                          <div className="gmail-msg-actions">
+                            <button
+                              className="gmail-ai-chip"
+                              onClick={() => {
+                                setActiveTab("chat");
+                                sendMessage(`Read my email from ${msg.from} with subject "${msg.subject}" (ID ${msg.id}) and provide a concise summary of the action items.`);
+                              }}
+                            >
+                              ✨ Summarize with AI
+                            </button>
+                            <button
+                              className="gmail-ai-chip"
+                              onClick={() => {
+                                setActiveTab("chat");
+                                sendMessage(`Read email ID ${msg.id} from ${msg.from} with subject "${msg.subject}" and draft a polite, professional reply to them.`);
+                              }}
+                            >
+                              ✍️ AI Draft Reply
+                            </button>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+
+                {/* Column 2: Account Setup & Quick Compose */}
+                <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
+                  {/* Account Setup Card */}
+                  <div className="gmail-card-panel">
+                    <div className="gmail-panel-header">
+                      <h3>Connect Your Gmail Account</h3>
+                    </div>
+                    <p style={{ fontSize: "0.8rem", color: "#a78bfa", lineHeight: 1.45 }}>
+                      Use a free 16-character Google App Password. Create one for free at{" "}
+                      <a
+                        href="https://myaccount.google.com/apppasswords"
+                        target="_blank"
+                        rel="noreferrer"
+                        style={{ color: "#c084fc", textDecoration: "underline" }}
+                      >
+                        myaccount.google.com/apppasswords
+                      </a>.
+                    </p>
+
+                    <form onSubmit={saveGmailConfig} className="gmail-form">
+                      <div className="gmail-field-group">
+                        <label>Gmail Address</label>
+                        <input
+                          type="email"
+                          className="gmail-input-field"
+                          placeholder="client@gmail.com"
+                          value={gmailEmailInput}
+                          onChange={(e) => setGmailEmailInput(e.target.value)}
+                          required
+                        />
+                      </div>
+                      <div className="gmail-field-group">
+                        <label>Google App Password (16 chars)</label>
+                        <input
+                          type="password"
+                          className="gmail-input-field"
+                          placeholder="xxxx xxxx xxxx xxxx"
+                          value={gmailPasswordInput}
+                          onChange={(e) => setGmailPasswordInput(e.target.value)}
+                          required
+                        />
+                      </div>
+                      <button type="submit" className="gmail-btn-primary">
+                        Save & Connect Account
+                      </button>
+                      {gmailConfigStatus && (
+                        <div
+                          className={`gmail-alert-box ${
+                            gmailConfigStatus.includes("✅") ? "gmail-alert-success" : "gmail-alert-error"
+                          }`}
+                        >
+                          {gmailConfigStatus}
+                        </div>
+                      )}
+                    </form>
+                  </div>
+
+                  {/* Quick Compose / Draft Card */}
+                  <div className="gmail-card-panel">
+                    <div className="gmail-panel-header">
+                      <h3>Draft or Send Email</h3>
+                    </div>
+                    <form className="gmail-form">
+                      <div className="gmail-field-group">
+                        <label>To (Recipient)</label>
+                        <input
+                          type="email"
+                          className="gmail-input-field"
+                          placeholder="partner@example.com"
+                          value={draftRecipient}
+                          onChange={(e) => setDraftRecipient(e.target.value)}
+                        />
+                      </div>
+                      <div className="gmail-field-group">
+                        <label>Subject</label>
+                        <input
+                          type="text"
+                          className="gmail-input-field"
+                          placeholder="Meeting follow-up"
+                          value={draftSubject}
+                          onChange={(e) => setDraftSubject(e.target.value)}
+                        />
+                      </div>
+                      <div className="gmail-field-group">
+                        <label>Message Content</label>
+                        <textarea
+                          className="gmail-textarea"
+                          placeholder="Write your email body or draft..."
+                          value={draftBody}
+                          onChange={(e) => setDraftBody(e.target.value)}
+                        />
+                      </div>
+                      <div className="gmail-form-actions">
+                        <button
+                          type="button"
+                          className="gmail-btn-secondary"
+                          style={{ flex: 1 }}
+                          onClick={handleCreateDraft}
+                          disabled={draftLoading}
+                        >
+                          Save as Draft
+                        </button>
+                        <button
+                          type="button"
+                          className="gmail-btn-primary"
+                          onClick={handleSendDirect}
+                          disabled={draftLoading}
+                        >
+                          Send Email
+                        </button>
+                      </div>
+                      {draftResult && (
+                        <div
+                          className={`gmail-alert-box ${
+                            draftResult.includes("✅") ? "gmail-alert-success" : "gmail-alert-error"
+                          }`}
+                        >
+                          {draftResult}
+                        </div>
+                      )}
+                    </form>
+                  </div>
+                </div>
               </div>
             </div>
           )}

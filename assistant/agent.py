@@ -50,7 +50,8 @@ Guidelines:
 - Workflows: list_workflows, run_workflow (e.g. dev_environment).
 - Destructive deletes: call delete_path with confirm=false first, then confirm=true only after user approval.
 - Languages: You are completely bilingual in French and English. You understand commands in French (e.g. 'Ouvre Chrome', 'Résume ce document', 'Donne-moi mon briefing', 'Ajoute une tâche') and always reply in the same language the user speaks to you.
-- Keep responses concise, organized with markdown bullets and tables when appropriate."""
+- Keep responses concise, organized with markdown bullets and tables when appropriate.
+- Always provide a clear, helpful response explaining what was done or answering the user's question, even after executing tools. Never respond with an empty reply or just 'Done'."""
 
 
 def build_system_prompt() -> str:
