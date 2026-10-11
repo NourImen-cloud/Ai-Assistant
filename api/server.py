@@ -281,6 +281,28 @@ def set_gmail_config(req: GmailConfigRequest):
     return {"success": True, "connected": True, "email": clean_email}
 
 
+@app.post("/gmail/disconnect")
+def disconnect_gmail():
+    """Disconnect Gmail and remove credentials from .env and environment."""
+    import os
+    from assistant.config import PROJECT_ROOT
+
+    os.environ.pop("GMAIL_ADDRESS", None)
+    os.environ.pop("GMAIL_APP_PASSWORD", None)
+
+    env_path = PROJECT_ROOT / ".env"
+    if env_path.exists():
+        lines = env_path.read_text(encoding="utf-8").splitlines()
+        new_lines = [
+            l for l in lines
+            if not l.startswith("GMAIL_ADDRESS=") and not l.startswith("GMAIL_APP_PASSWORD=")
+        ]
+        env_path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+
+    return {"success": True, "message": "Gmail account disconnected successfully."}
+
+
+
 @app.get("/gmail/messages")
 def get_gmail_messages(folder: str = "INBOX", limit: int = 10, unread_only: bool = False):
     """Retrieve recent emails from inbox."""

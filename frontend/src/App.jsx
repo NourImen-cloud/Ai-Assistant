@@ -195,6 +195,9 @@ export default function App() {
   const [gmailEmailInput, setGmailEmailInput] = useState("");
   const [gmailPasswordInput, setGmailPasswordInput] = useState("");
   const [gmailConfigStatus, setGmailConfigStatus] = useState("");
+  const [showConnectCard, setShowConnectCard] = useState(false);
+  const [connectCardDismissed, setConnectCardDismissed] = useState(false);
+  const [hideConnectedCard, setHideConnectedCard] = useState(false);
   const [draftRecipient, setDraftRecipient] = useState("");
   const [draftSubject, setDraftSubject] = useState("");
   const [draftBody, setDraftBody] = useState("");
@@ -274,12 +277,36 @@ export default function App() {
           setGmailConfigStatus("✅ Connected successfully!");
           fetchGmailStatus();
           fetchGmailMessages();
+          setTimeout(() => {
+            setShowConnectCard(false);
+            setConnectCardDismissed(true);
+          }, 1200);
         } else {
           setGmailConfigStatus(`❌ ${d.error || "Connection failed. Please check credentials."}`);
         }
       })
       .catch((err) => setGmailConfigStatus(`❌ Error: ${err.message}`));
   };
+
+  const handleDisconnectGmail = async () => {
+    if (!window.confirm(`Disconnect ${gmailStatus.email || "this Gmail account"}?`)) return;
+    try {
+      const res = await fetch(`${API}/gmail/disconnect`, { method: "POST" });
+      const d = await res.json();
+      if (d.success) {
+        setGmailStatus({ configured: false, email: "", connected: false, message: "" });
+        setGmailEmailInput("");
+        setGmailPasswordInput("");
+        setGmailMessages([]);
+        setGmailConfigStatus("");
+        setShowConnectCard(false);
+        setConnectCardDismissed(false);
+      }
+    } catch (err) {
+      alert(`Error disconnecting: ${err.message}`);
+    }
+  };
+
 
   const handleCreateDraft = (e) => {
     e.preventDefault();
@@ -1127,20 +1154,56 @@ export default function App() {
                       </span>
                     )}
                     <span style={{ marginLeft: "8px" }}>
-                      Connect any standard Gmail account in 60 seconds (100% free).
+                      {gmailStatus.configured && gmailStatus.connected
+                        ? "AI email reading, smart drafting, and inbox automation ready."
+                        : "Connect any standard Gmail account in 60 seconds (100% free)."}
                     </span>
                   </div>
                 </div>
-                <button
-                  className="gmail-btn-secondary"
-                  onClick={() => {
-                    fetchGmailStatus();
-                    fetchGmailMessages();
-                  }}
-                  title="Refresh Gmail connection and messages"
-                >
-                  🔄 Sync Gmail
-                </button>
+                <div style={{ display: "flex", gap: "0.6rem", alignItems: "center", flexWrap: "wrap" }}>
+                  {gmailStatus.configured && gmailStatus.connected ? (
+                    <>
+                      <button
+                        className="gmail-btn-secondary"
+                        onClick={() => {
+                          setShowConnectCard((prev) => !prev);
+                          setHideConnectedCard(false);
+                        }}
+                        title={showConnectCard ? "Hide Settings" : "Account Settings"}
+                      >
+                        ⚙️ {showConnectCard ? "Hide Settings" : "Account Settings"}
+                      </button>
+                      <button
+                        className="gmail-btn-secondary gmail-btn-danger-outline"
+                        onClick={handleDisconnectGmail}
+                        title="Disconnect email"
+                      >
+                        Unlink
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      className="gmail-btn-secondary"
+                      onClick={() => {
+                        setShowConnectCard(true);
+                        setConnectCardDismissed(false);
+                      }}
+                      title="Connect Gmail account"
+                    >
+                      ➕ Connect Account
+                    </button>
+                  )}
+                  <button
+                    className="gmail-btn-secondary"
+                    onClick={() => {
+                      fetchGmailStatus();
+                      fetchGmailMessages();
+                    }}
+                    title="Refresh Gmail connection and messages"
+                  >
+                    🔄 Sync Gmail
+                  </button>
+                </div>
               </div>
 
               {/* Main Two-Column Layout */}
@@ -1206,60 +1269,132 @@ export default function App() {
 
                 {/* Column 2: Account Setup & Quick Compose */}
                 <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
-                  {/* Account Setup Card */}
-                  <div className="gmail-card-panel">
-                    <div className="gmail-panel-header">
-                      <h3>Connect Your Gmail Account</h3>
-                    </div>
-                    <p style={{ fontSize: "0.8rem", color: "#a78bfa", lineHeight: 1.45 }}>
-                      Use a free 16-character Google App Password. Create one for free at{" "}
-                      <a
-                        href="https://myaccount.google.com/apppasswords"
-                        target="_blank"
-                        rel="noreferrer"
-                        style={{ color: "#c084fc", textDecoration: "underline" }}
-                      >
-                        myaccount.google.com/apppasswords
-                      </a>.
-                    </p>
-
-                    <form onSubmit={saveGmailConfig} className="gmail-form">
-                      <div className="gmail-field-group">
-                        <label>Gmail Address</label>
-                        <input
-                          type="email"
-                          className="gmail-input-field"
-                          placeholder="client@gmail.com"
-                          value={gmailEmailInput}
-                          onChange={(e) => setGmailEmailInput(e.target.value)}
-                          required
-                        />
-                      </div>
-                      <div className="gmail-field-group">
-                        <label>Google App Password (16 chars)</label>
-                        <input
-                          type="password"
-                          className="gmail-input-field"
-                          placeholder="xxxx xxxx xxxx xxxx"
-                          value={gmailPasswordInput}
-                          onChange={(e) => setGmailPasswordInput(e.target.value)}
-                          required
-                        />
-                      </div>
-                      <button type="submit" className="gmail-btn-primary">
-                        Save & Connect Account
-                      </button>
-                      {gmailConfigStatus && (
-                        <div
-                          className={`gmail-alert-box ${
-                            gmailConfigStatus.includes("✅") ? "gmail-alert-success" : "gmail-alert-error"
-                          }`}
-                        >
-                          {gmailConfigStatus}
+                  {/* Connected Account Summary (Compact & Removable with ✕) */}
+                  {gmailStatus.configured && gmailStatus.connected && !showConnectCard && !hideConnectedCard && (
+                    <div className="gmail-connected-card">
+                      <div className="gmail-connected-info">
+                        <div className="gmail-connected-avatar">
+                          {gmailStatus.email ? gmailStatus.email[0].toUpperCase() : "G"}
                         </div>
-                      )}
-                    </form>
-                  </div>
+                        <div className="gmail-connected-details">
+                          <div className="gmail-connected-header-line">
+                            <span className="gmail-connected-badge-dot"></span>
+                            <span className="gmail-connected-status-text">Connected Gmail</span>
+                          </div>
+                          <span className="gmail-connected-email" title={gmailStatus.email}>
+                            {gmailStatus.email}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="gmail-connected-btn-group">
+                        <button
+                          className="gmail-btn-mini"
+                          onClick={() => setShowConnectCard(true)}
+                          title="Change credentials or reconnect"
+                        >
+                          ⚙️ Change
+                        </button>
+                        <button
+                          className="gmail-btn-mini gmail-btn-danger"
+                          onClick={handleDisconnectGmail}
+                          title="Remove account credentials"
+                        >
+                          Disconnect
+                        </button>
+                        <button
+                          className="gmail-card-close-btn"
+                          onClick={() => setHideConnectedCard(true)}
+                          title="Remove from screen (close)"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Account Setup Card (Removable with ✕ and Close button) */}
+                  {(showConnectCard || (!gmailStatus.connected && !connectCardDismissed)) && (
+                    <div className="gmail-card-panel gmail-connect-panel">
+                      <div className="gmail-panel-header">
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                          <MailIcon />
+                          <h3>{gmailStatus.connected ? "Update Gmail Connection" : "Connect Your Gmail Account"}</h3>
+                        </div>
+                        <button
+                          className="gmail-card-close-btn"
+                          onClick={() => {
+                            setShowConnectCard(false);
+                            setConnectCardDismissed(true);
+                          }}
+                          title="Close / Remove this panel"
+                          aria-label="Close"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                      <p style={{ fontSize: "0.8rem", color: "#a78bfa", lineHeight: 1.45 }}>
+                        Use a free 16-character Google App Password. Create one for free at{" "}
+                        <a
+                          href="https://myaccount.google.com/apppasswords"
+                          target="_blank"
+                          rel="noreferrer"
+                          style={{ color: "#c084fc", textDecoration: "underline" }}
+                        >
+                          myaccount.google.com/apppasswords
+                        </a>.
+                      </p>
+
+                      <form onSubmit={saveGmailConfig} className="gmail-form">
+                        <div className="gmail-field-group">
+                          <label>Gmail Address</label>
+                          <input
+                            type="email"
+                            className="gmail-input-field"
+                            placeholder="client@gmail.com"
+                            value={gmailEmailInput}
+                            onChange={(e) => setGmailEmailInput(e.target.value)}
+                            required
+                          />
+                        </div>
+                        <div className="gmail-field-group">
+                          <label>Google App Password (16 chars)</label>
+                          <input
+                            type="password"
+                            className="gmail-input-field"
+                            placeholder="xxxx xxxx xxxx xxxx"
+                            value={gmailPasswordInput}
+                            onChange={(e) => setGmailPasswordInput(e.target.value)}
+                            required
+                          />
+                        </div>
+                        <div className="gmail-form-actions">
+                          <button type="submit" className="gmail-btn-primary">
+                            Save & Connect Account
+                          </button>
+                          <button
+                            type="button"
+                            className="gmail-btn-secondary"
+                            onClick={() => {
+                              setShowConnectCard(false);
+                              setConnectCardDismissed(true);
+                            }}
+                          >
+                            Close
+                          </button>
+                        </div>
+                        {gmailConfigStatus && (
+                          <div
+                            className={`gmail-alert-box ${
+                              gmailConfigStatus.includes("✅") ? "gmail-alert-success" : "gmail-alert-error"
+                            }`}
+                          >
+                            {gmailConfigStatus}
+                          </div>
+                        )}
+                      </form>
+                    </div>
+                  )}
+
 
                   {/* Quick Compose / Draft Card */}
                   <div className="gmail-card-panel">
