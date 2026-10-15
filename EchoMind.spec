@@ -36,6 +36,16 @@ hiddenimports = [
     'trafilatura',
     'ddgs',
     'openai',
+    'pyautogui',
+    'pyscreeze',
+    'pygetwindow',
+    'mouseinfo',
+    'pyrect',
+    'pytweening',
+    'PIL',
+    'PIL.Image',
+    'PIL.ImageGrab',
+    'mss',
 ]
 hiddenimports += collect_submodules('assistant')
 

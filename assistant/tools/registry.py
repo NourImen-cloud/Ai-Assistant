@@ -30,6 +30,7 @@ TOOL_HANDLERS: dict[str, ToolHandler] = {
     "open_in_vscode": files.open_in_vscode,
     "rename_path": files.rename_path,
     "list_directory": files.list_directory,
+    "search_local_files": files.search_local_files,
     "delete_path": files.delete_path,
     "type_text": automation.type_text,
     "press_hotkey": automation.press_hotkey,
@@ -287,6 +288,38 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                     },
                 },
                 "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_local_files",
+            "description": (
+                "Search for files and folders on the user's PC by name, extension, or pattern. "
+                "Use this whenever the user wants to find, locate, or search for files locally (e.g. 'find my report', 'search for csv files')."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "File or folder name pattern to look for.",
+                    },
+                    "location": {
+                        "type": "string",
+                        "description": "'all' (Desktop, Documents, Downloads), 'desktop', 'documents', 'downloads', or a folder path.",
+                    },
+                    "file_type": {
+                        "type": "string",
+                        "description": "Optional extension filter, e.g. '.pdf', '.csv', '.xlsx', '.py', '.txt'.",
+                    },
+                    "max_results": {
+                        "type": "integer",
+                        "description": "Max matching files to return. Default 15.",
+                    },
+                },
+                "required": ["query"],
             },
         },
     },
@@ -980,6 +1013,7 @@ TOOL_CATEGORIES: dict[str, list[str]] = {
         "draft_email",
     ],
     "files": [
+        "search_local_files",
         "create_folder",
         "create_file",
         "open_folder",
@@ -1006,11 +1040,11 @@ TOOL_CATEGORIES: dict[str, list[str]] = {
         "close_browser",
     ],
     "automation": [
+        "take_screenshot",
         "type_text",
         "press_hotkey",
         "move_mouse",
         "click",
-        "take_screenshot",
         "get_screen_size",
     ],
     "memory": [
@@ -1027,8 +1061,8 @@ TOOL_CATEGORIES: dict[str, list[str]] = {
 
 CATEGORY_KEYWORDS: dict[str, list[str]] = {
     "research": [
-        "research", "search", "paper", "article", "arxiv", "scholar", "quantum",
-        "find", "web", "compare", "cherch", "recherch", "trouv", "synth", "résum", "resum"
+        "research", "paper", "article", "arxiv", "scholar", "quantum",
+        "web", "compare", "recherch", "synth", "internet", "en ligne"
     ],
     "documents": [
         "document", "pdf", "docx", "doc", "summar", "read", "folder", "résumé", "resume", "lire"
@@ -1046,16 +1080,16 @@ CATEGORY_KEYWORDS: dict[str, list[str]] = {
         "gmail", "mail", "email", "inbox", "draft", "message", "courrier", "brouillon", "envoyer"
     ],
     "files": [
-        "file", "folder", "directory", "path", "create", "delete", "rename", "vscode", "dossier", "fichier"
+        "file", "folder", "directory", "path", "find", "search", "create", "delete", "rename", "vscode", "dossier", "fichier", "cherch", "trouv", "local"
     ],
     "apps": [
-        "open", "close", "launch", "app", "chrome", "calc", "terminal", "ouvr", "ferm", "lanc"
+        "open", "close", "launch", "app", "chrome", "calc", "terminal", "ouvr", "ferm", "lanc", "youtube", "spotify", "netflix", "chatgpt"
     ],
     "browser": [
         "browser", "youtube", "navigate", "click", "type", "webpage", "navigateur"
     ],
     "automation": [
-        "mouse", "click", "screenshot", "hotkey", "keyboard", "screen", "souris", "clavier", "capture"
+        "mouse", "click", "screenshot", "screeshot", "snapshot", "printscreen", "capture", "ecran", "écran", "photo", "hotkey", "keyboard", "screen", "souris", "clavier"
     ],
     "memory": [
         "preference", "project", "workflow", "save", "remember", "projet", "sauvegard"
@@ -1065,6 +1099,8 @@ CATEGORY_KEYWORDS: dict[str, list[str]] = {
 CORE_TOOLS = [
     "open_application",
     "open_website",
+    "search_local_files",
+    "take_screenshot",
     "deep_web_research",
     "get_daily_briefing",
     "manage_todo",

@@ -14,10 +14,30 @@ CHARTS_DIR.mkdir(parents=True, exist_ok=True)
 def _load_dataframe(file_path: str):
     import pandas as pd
 
-    path = ensure_within_home(resolve_path(file_path))
-    if not path.exists():
-        raise FileNotFoundError(f"File not found: {path}")
+    clean = str(file_path).strip().strip("'\"")
+    path_candidates = [
+        Path(clean),
+        PROJECT_ROOT / "uploads" / clean,
+        PROJECT_ROOT / "uploads" / Path(clean).name,
+        Path.home() / "Desktop" / clean,
+        Path.home() / "Documents" / clean,
+        Path.home() / "Downloads" / clean,
+    ]
+    try:
+        path_candidates.append(ensure_within_home(resolve_path(clean)))
+    except Exception:
+        pass
 
+    target_path = None
+    for p in path_candidates:
+        if p.exists() and p.is_file():
+            target_path = p
+            break
+
+    if not target_path:
+        raise FileNotFoundError(f"File not found: '{file_path}'. Checked current directory, uploads/, Desktop, Documents, and Downloads.")
+
+    path = target_path
     suffix = path.suffix.lower()
     if suffix in {".csv", ".txt"}:
         return pd.read_csv(path), path

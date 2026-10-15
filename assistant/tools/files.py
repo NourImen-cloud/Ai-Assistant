@@ -2,6 +2,7 @@
 
 import os
 import subprocess
+from typing import Any
 
 from assistant.tools.paths import ensure_within_home, resolve_path
 
@@ -158,3 +159,119 @@ def open_in_vscode(path: str) -> dict[str, str]:
         return {"status": "success", "message": f"Opened in VS Code: {resolved}"}
     except (OSError, PermissionError, ValueError) as exc:
         return {"status": "error", "message": str(exc)}
+
+
+def search_local_files(
+    query: str,
+    location: str = "all",
+    file_type: str | None = None,
+    max_results: int = 15,
+) -> dict[str, Any]:
+    """Search for local files and folders by name, pattern, or extension on the user's computer.
+
+    location: 'all' (desktop, documents, downloads), 'desktop', 'documents', 'downloads', or a custom path.
+    file_type: optional extension filter like '.pdf', '.csv', '.xlsx', '.py', '.txt', '.docx'.
+    """
+    import datetime
+    from pathlib import Path
+
+    query_clean = (query or "").strip().lower()
+    if not query_clean and not file_type:
+        return {"status": "error", "message": "Please specify a file name query or file extension."}
+
+    home = Path.home()
+    search_dirs: list[Path] = []
+
+    loc_lower = (location or "all").lower().strip()
+    if loc_lower == "all":
+        search_dirs = [
+            home / "Desktop",
+            home / "Documents",
+            home / "Downloads",
+        ]
+    elif loc_lower in {"desktop", "bureau"}:
+        search_dirs = [home / "Desktop"]
+    elif loc_lower in {"documents", "mes documents"}:
+        search_dirs = [home / "Documents"]
+    elif loc_lower in {"downloads", "téléchargements", "telechargements"}:
+        search_dirs = [home / "Downloads"]
+    else:
+        try:
+            custom_path = ensure_within_home(resolve_path(location))
+            if custom_path.exists() and custom_path.is_dir():
+                search_dirs = [custom_path]
+        except Exception:
+            search_dirs = [home / "Desktop", home / "Documents", home / "Downloads"]
+
+    skip_dirs = {
+        "node_modules", ".git", ".venv", "venv", "__pycache__", "appdata",
+        ".vscode", ".cache", "dist", "build", "installer_output"
+    }
+
+    results = []
+
+    for base_dir in search_dirs:
+        if not base_dir.exists():
+            continue
+
+        for root, dirs, files_list in os.walk(base_dir):
+            # Prune unwanted directories
+            dirs[:] = [d for d in dirs if d.lower() not in skip_dirs and not d.startswith(".")]
+
+            # Limit deep nested searches (max depth 4)
+            depth = len(Path(root).relative_to(base_dir).parts)
+            if depth > 4:
+                dirs.clear()
+                continue
+
+            for fname in files_list:
+                fname_lower = fname.lower()
+
+                # Filter by extension if requested
+                if file_type:
+                    ext = file_type.lower()
+                    if not ext.startswith("."):
+                        ext = f".{ext}"
+                    if not fname_lower.endswith(ext):
+                        continue
+
+                # Match query in filename
+                if query_clean and query_clean not in fname_lower:
+                    continue
+
+                full_path = Path(root) / fname
+                try:
+                    stat = full_path.stat()
+                    size_kb = stat.st_size / 1024
+                    size_str = f"{size_kb:.1f} KB" if size_kb < 1024 else f"{size_kb/1024:.2f} MB"
+                    mtime = datetime.datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M")
+                    results.append({
+                        "name": fname,
+                        "path": str(full_path),
+                        "size": size_str,
+                        "modified": mtime,
+                        "folder": Path(root).name,
+                    })
+                except Exception:
+                    continue
+
+                if len(results) >= max_results:
+                    break
+            if len(results) >= max_results:
+                break
+        if len(results) >= max_results:
+            break
+
+    if not results:
+        target_loc = f"in {location}" if location != "all" else "in Desktop, Documents, or Downloads"
+        return {"status": "success", "message": f"No files matching '{query}' found {target_loc}."}
+
+    lines = [f"- [File] **{r['name']}** ({r['size']}, mod: {r['modified']})\n  `{r['path']}`" for r in results]
+    msg = f"Found {len(results)} matching file(s):\n" + "\n".join(lines)
+    return {
+        "status": "success",
+        "message": msg,
+        "count": len(results),
+        "files": results,
+    }
+

@@ -87,9 +87,8 @@ def take_screenshot(
     filename: str | None = None,
     location: str | None = None,
 ) -> dict[str, str]:
-    """Capture the full screen and save a PNG."""
+    """Capture the full screen and save a PNG image."""
     try:
-        gui = _pyautogui()
         if location:
             folder = ensure_within_home(resolve_path(location))
         else:
@@ -100,10 +99,61 @@ def take_screenshot(
         if not name.lower().endswith(".png"):
             name = f"{name}.png"
 
-        path = ensure_within_home(folder / name) if location else (folder / name).resolve()
-        image = gui.screenshot()
-        image.save(path)
-        return {"status": "success", "message": f"Screenshot saved: {path}"}
+        path = (folder / name).resolve()
+
+        # 1. Try PyAutoGUI
+        captured = False
+        try:
+            gui = _pyautogui()
+            image = gui.screenshot()
+            image.save(path)
+            captured = True
+        except Exception:
+            pass
+
+        # 2. Fallback to PIL ImageGrab
+        if not captured:
+            try:
+                from PIL import ImageGrab
+                image = ImageGrab.grab(all_screens=True)
+                image.save(path)
+                captured = True
+            except Exception:
+                pass
+
+        # 3. Fallback to PowerShell .NET screen copy
+        if not captured:
+            try:
+                import base64
+                import subprocess
+                ps_script = f"""
+                Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+                $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+                $bmp = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
+                $gfx = [System.Drawing.Graphics]::FromImage($bmp)
+                $gfx.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+                $bmp.Save('{str(path).replace('\\', '\\\\')}', [System.Drawing.Imaging.ImageFormat]::Png)
+                $gfx.Dispose()
+                $bmp.Dispose()
+                """
+                enc = base64.b64encode(ps_script.encode("utf-16le")).decode("ascii")
+                subprocess.run(
+                    ["powershell", "-NoProfile", "-NonInteractive", "-EncodedCommand", enc],
+                    check=True,
+                    capture_output=True,
+                )
+                if path.exists() and path.stat().st_size > 0:
+                    captured = True
+            except Exception:
+                pass
+
+        if captured and path.exists():
+            return {
+                "status": "success",
+                "message": f"Screenshot successfully captured and saved to: {path}",
+                "file_path": str(path),
+            }
+        return {"status": "error", "message": "Failed to capture screenshot. Ensure the desktop session is active."}
     except Exception as exc:  # noqa: BLE001
         return {"status": "error", "message": f"Failed to take screenshot: {exc}"}
 
