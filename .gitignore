@@ -13,3 +13,6 @@ screenshots/
 data/
 frontend/node_modules/
 frontend/dist/
+installer_output/
+uploads/
+*.exe

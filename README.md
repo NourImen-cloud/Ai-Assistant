@@ -230,7 +230,3 @@ python main.py --voice
 * **Tool Whitelisting:** The LLM cannot execute arbitrary PowerShell/CMD strings — all actions pass through strictly validated tool handlers.
 
 ---
-
-## 📄 License
-
-This project is licensed under the MIT License.

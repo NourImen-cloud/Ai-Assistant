@@ -9,9 +9,10 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from assistant.agent import AssistantAgent
@@ -30,9 +31,95 @@ app.add_middleware(
 
 agent = AssistantAgent()
 
+UPLOAD_DIR = PROJECT_ROOT / "uploads"
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
+
+
+def extract_file_text(file_path: Path, filename: str) -> tuple[str, str]:
+    """Extract readable text and metadata summary from uploaded file."""
+    suffix = file_path.suffix.lower()
+    text = ""
+    file_type = "document"
+
+    if suffix == ".pdf":
+        file_type = "pdf"
+        try:
+            import pypdf
+            reader = pypdf.PdfReader(str(file_path))
+            pages = []
+            for idx, page in enumerate(reader.pages[:25]):
+                t = page.extract_text() or ""
+                if t:
+                    pages.append(f"--- Page {idx+1} ---\n{t.strip()}")
+            text = "\n\n".join(pages)
+        except Exception as e:
+            text = f"Failed to extract PDF text: {e}"
+
+    elif suffix in {".docx", ".doc"}:
+        file_type = "docx"
+        try:
+            import docx
+            doc = docx.Document(str(file_path))
+            paras = [p.text for p in doc.paragraphs if p.text.strip()]
+            text = "\n".join(paras)
+        except Exception as e:
+            text = f"Failed to extract Word document: {e}"
+
+    elif suffix in {".csv", ".tsv"}:
+        file_type = "data"
+        try:
+            import pandas as pd
+            sep = "\t" if suffix == ".tsv" else ","
+            df = pd.read_csv(str(file_path), sep=sep, nrows=100)
+            text = (
+                f"Data file with {len(df.columns)} columns: {list(df.columns)}\n"
+                f"Preview (first 10 rows):\n{df.head(10).to_string()}\n"
+                f"Summary statistics:\n{df.describe().to_string()}"
+            )
+        except Exception as e:
+            try:
+                text = file_path.read_text(encoding="utf-8", errors="replace")[:8000]
+            except Exception:
+                text = f"Failed to parse CSV: {e}"
+
+    elif suffix in {".xlsx", ".xls"}:
+        file_type = "excel"
+        try:
+            import pandas as pd
+            df = pd.read_excel(str(file_path), nrows=100)
+            text = (
+                f"Excel spreadsheet with {len(df.columns)} columns: {list(df.columns)}\n"
+                f"Preview:\n{df.head(10).to_string()}"
+            )
+        except Exception as e:
+            text = f"Excel spreadsheet: {filename}. (Could not parse tables: {e})"
+
+    elif suffix in {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"}:
+        file_type = "image"
+        text = f"[Image file attached: {filename} saved at {file_path}]"
+
+    else:
+        file_type = "code" if suffix in {".py", ".js", ".jsx", ".ts", ".tsx", ".html", ".css", ".json", ".sql", ".sh"} else "text"
+        try:
+            text = file_path.read_text(encoding="utf-8", errors="replace")
+        except Exception as e:
+            text = f"Could not read text: {e}"
+
+    return text, file_type
+
+
+class AttachedFile(BaseModel):
+    filename: str
+    file_path: str
+    extracted_text: str | None = None
+    file_type: str | None = None
+    file_size: int | None = None
+
 
 class ChatRequest(BaseModel):
-    message: str
+    message: str = ""
+    files: list[AttachedFile] | None = None
 
 
 class ChatResponse(BaseModel):
@@ -49,6 +136,10 @@ class WorkflowRequest(BaseModel):
     name: str
 
 
+class UserProfileRequest(BaseModel):
+    name: str
+
+
 @app.get("/health")
 def health():
     return {
@@ -58,25 +149,104 @@ def health():
     }
 
 
+@app.get("/user/profile")
+def get_profile():
+    from assistant.agent import get_user_name
+    return {"name": get_user_name()}
+
+
+@app.post("/user/profile")
+def set_profile(req: UserProfileRequest):
+    new_name = req.name.strip()
+    if new_name:
+        agent.memory.set_preference("user_name", new_name)
+    from assistant.agent import get_user_name
+    return {"name": get_user_name()}
+
+
+def _build_chat_prompt(req: ChatRequest) -> tuple[str, str]:
+    """Build full prompt for LLM and a clean display prompt for history."""
+    cleaned = (req.message or "").strip()
+    if not cleaned and not req.files:
+        raise HTTPException(status_code=400, detail="Message or attached file is required.")
+
+    if not req.files:
+        return cleaned, cleaned
+
+    file_blocks = []
+    file_names = []
+    for f in req.files:
+        preview = (f.extracted_text or "")[:2000]
+        file_names.append(f.filename)
+        file_blocks.append(
+            f"--- ATTACHED FILE: {f.filename} ---\n"
+            f"Type: {f.file_type or 'document'}\n"
+            f"Extracted Content:\n{preview}\n"
+            f"--- END OF ATTACHED FILE: {f.filename} ---"
+        )
+
+    user_prompt = cleaned if cleaned else f"Please examine and analyze the attached file: {', '.join(file_names)}."
+    full_message = (
+        "\n\n".join(file_blocks)
+        + "\n\n(Note: The attached file excerpt is already provided above. Answer and summarize directly from this excerpt — do NOT call read_document or summarize_document again for this file.)"
+        + f"\n\nUser Question/Instruction:\n{user_prompt}"
+    )
+
+    display_message = (
+        f"[📎 {', '.join(file_names)}] {cleaned}" if cleaned else f"[📎 Attached: {', '.join(file_names)}]"
+    )
+    return full_message, display_message
+
+
+@app.post("/upload")
+async def upload_file(file: UploadFile = File(...)):
+    """Upload a file, save it to uploads directory, and extract its content."""
+    try:
+        clean_filename = Path(file.filename or "attachment.txt").name
+        dest_path = UPLOAD_DIR / clean_filename
+
+        # If file exists, generate unique name
+        if dest_path.exists():
+            import time
+            stem = Path(clean_filename).stem
+            suffix = Path(clean_filename).suffix
+            dest_path = UPLOAD_DIR / f"{stem}_{int(time.time())}{suffix}"
+
+        content = await file.read()
+        with open(dest_path, "wb") as f:
+            f.write(content)
+
+        extracted_text, file_type = extract_file_text(dest_path, dest_path.name)
+
+        return {
+            "status": "success",
+            "filename": dest_path.name,
+            "original_name": clean_filename,
+            "file_path": str(dest_path).replace("\\", "/"),
+            "file_size": len(content),
+            "file_type": file_type,
+            "extracted_text": extracted_text[:8000],
+            "total_chars": len(extracted_text),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
+
+
 @app.post("/chat", response_model=ChatResponse)
 def chat(req: ChatRequest):
-    cleaned = req.message.strip()
-    if not cleaned:
-        raise HTTPException(status_code=400, detail="Message cannot be empty.")
-    reply = agent.run(cleaned)
+    full_msg, disp_msg = _build_chat_prompt(req)
+    reply = agent.run(full_msg, display_input=disp_msg)
     return ChatResponse(reply=reply, provider=agent.provider_label())
 
 
 @app.post("/chat/stream")
 def chat_stream(req: ChatRequest):
     """Real-time token streaming via Server-Sent Events (SSE)."""
-    cleaned = req.message.strip()
-    if not cleaned:
-        raise HTTPException(status_code=400, detail="Message cannot be empty.")
+    full_msg, disp_msg = _build_chat_prompt(req)
 
     def event_stream():
         try:
-            for chunk in agent.run_stream(cleaned):
+            for chunk in agent.run_stream(full_msg, display_input=disp_msg):
                 yield f"data: {json.dumps({'chunk': chunk})}\n\n"
         except Exception as exc:
             yield f"data: {json.dumps({'error': str(exc)})}\n\n"
@@ -181,6 +351,19 @@ def get_events():
     """Retrieve upcoming calendar events."""
     events = agent.memory.list_events(limit=15)
     return {"events": events}
+
+
+@app.post("/events")
+def create_event(data: dict[str, Any]):
+    """Create a new calendar event."""
+    title = data.get("title", "").strip()
+    date = data.get("date", "").strip()
+    time = data.get("time", "").strip()
+    notes = data.get("notes", "").strip()
+    if not title or not date:
+        return {"success": False, "error": "Title and date are required"}
+    new_id = agent.memory.add_event(title, date, time, notes)
+    return {"success": True, "id": new_id}
 
 
 @app.delete("/events/{event_id}")
@@ -324,7 +507,16 @@ def send_gmail_direct(req: GmailDraftRequest):
     """Send an email immediately."""
     from assistant.tools.email_tools import send_gmail_message
 
-    return send_gmail_message(recipient=req.recipient, subject=req.subject, body=req.body)
+FRONTEND_DIST = PROJECT_ROOT / "frontend" / "dist"
+if FRONTEND_DIST.exists():
+    app.mount("/assets", StaticFiles(directory=str(FRONTEND_DIST / "assets")), name="assets")
+
+    @app.get("/{full_path:path}")
+    def serve_frontend(full_path: str):
+        file_path = FRONTEND_DIST / full_path
+        if full_path and file_path.is_file():
+            return FileResponse(file_path)
+        return FileResponse(FRONTEND_DIST / "index.html")
 
 
 def main():

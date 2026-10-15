@@ -1,11 +1,23 @@
 import os
+import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
 
-load_dotenv()
+if getattr(sys, "frozen", False):
+    PROJECT_ROOT = Path(sys.executable).resolve().parent
+    if (PROJECT_ROOT / ".env").exists():
+        load_dotenv(PROJECT_ROOT / ".env")
+    elif getattr(sys, "_MEIPASS", None) and (Path(sys._MEIPASS) / ".env").exists():
+        load_dotenv(Path(sys._MEIPASS) / ".env")
+    elif (PROJECT_ROOT / "_internal" / ".env").exists():
+        load_dotenv(PROJECT_ROOT / "_internal" / ".env")
+    else:
+        load_dotenv()
+else:
+    PROJECT_ROOT = Path(__file__).resolve().parent.parent
+    load_dotenv(PROJECT_ROOT / ".env")
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = PROJECT_ROOT / "data"
 DATA_DIR.mkdir(exist_ok=True)
 

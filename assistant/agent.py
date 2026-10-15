@@ -7,31 +7,40 @@ from assistant.tools.registry import TOOL_DEFINITIONS, execute_tool, get_tools_f
 
 
 def prune_old_tool_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Prune large tool outputs from older conversation turns to stay under token limits."""
+    """Prune large tool outputs from conversation to strictly stay under token limits."""
     last_user_idx = -1
     for i in range(len(messages) - 1, -1, -1):
         if messages[i].get("role") == "user":
             last_user_idx = i
             break
 
-    if last_user_idx <= 0:
-        return messages
-
     pruned = []
     for i, msg in enumerate(messages):
-        if i < last_user_idx and msg.get("role") == "tool":
-            content = msg.get("content", "")
-            if len(content) > 250:
+        if msg.get("role") == "tool":
+            content = str(msg.get("content", ""))
+            limit = 250 if i < last_user_idx else 2000
+            if len(content) > limit:
                 copy_msg = dict(msg)
-                copy_msg["content"] = content[:200] + "... [earlier tool output truncated]"
+                copy_msg["content"] = content[:limit] + "... [truncated for token limit]"
                 pruned.append(copy_msg)
                 continue
         pruned.append(msg)
     return pruned
 
 
-BASE_SYSTEM_PROMPT = """You are Echo Mind, an advanced personal AI copilot for Nour's Windows computer.
-Your job is to understand what Nour wants and call the appropriate tool(s) to automate tasks, analyze data, research, and boost productivity. You do NOT execute shell commands directly — only use the provided tools.
+def get_user_name() -> str:
+    try:
+        name = get_memory_store().get_preference("user_name")
+        if name:
+            return name
+        import getpass
+        return getpass.getuser().capitalize()
+    except Exception:
+        return "User"
+
+
+BASE_SYSTEM_PROMPT_TEMPLATE = """You are Echo Mind, an advanced personal AI copilot for {user_name}'s Windows computer.
+Your job is to understand what {user_name} wants and call the appropriate tool(s) to automate tasks, analyze data, research, and boost productivity. You do NOT execute shell commands directly — only use the provided tools.
 
 Guidelines:
 - Research (ALWAYS prefer these over browser tools for web searches — they work headlessly with no CAPTCHAs):
@@ -55,10 +64,12 @@ Guidelines:
 
 
 def build_system_prompt() -> str:
+    user_name = get_user_name()
+    base_prompt = BASE_SYSTEM_PROMPT_TEMPLATE.format(user_name=user_name)
     memory = get_memory_store().context_summary()
     if memory:
-        return f"{BASE_SYSTEM_PROMPT}\n\n--- Saved memory ---\n{memory}"
-    return BASE_SYSTEM_PROMPT
+        return f"{base_prompt}\n\n--- Saved memory ---\n{memory}"
+    return base_prompt
 
 
 class AssistantAgent:
@@ -70,7 +81,7 @@ class AssistantAgent:
             {"role": "system", "content": build_system_prompt()}
         ]
 
-    def run(self, user_input: str) -> str:
+    def run(self, user_input: str, display_input: str | None = None) -> str:
         """Process user input and return the assistant's response."""
         # Always synchronize system prompt with latest saved memory
         if self.messages and self.messages[0].get("role") == "system":
@@ -82,7 +93,7 @@ class AssistantAgent:
         if len(self.messages) > 25:
             self.messages = [self.messages[0]] + self.messages[-20:]
 
-        self.memory.add_message("user", user_input)
+        self.memory.add_message("user", display_input or user_input)
         self.messages.append({"role": "user", "content": user_input})
 
         # Ensure all tool messages in history have a name (required by Harmony / vLLM / Groq)
@@ -104,6 +115,7 @@ class AssistantAgent:
                     messages=prune_old_tool_messages(self.messages),
                     tools=active_tools,
                     tool_choice="auto",
+                    max_tokens=2048,
                 )
             except Exception as exc:
                 err_msg = f"LLM error: {exc}"
@@ -146,12 +158,16 @@ class AssistantAgent:
                 else:
                     result = execute_tool(call.function.name, args)
 
+                raw_tool_content = json.dumps(result)
+                if len(raw_tool_content) > 2000:
+                    raw_tool_content = raw_tool_content[:2000] + "... [truncated to fit token limit]"
+
                 self.messages.append(
                     {
                         "role": "tool",
                         "tool_call_id": call.id,
                         "name": call.function.name,
-                        "content": json.dumps(result),
+                        "content": raw_tool_content,
                     }
                 )
 
@@ -159,7 +175,7 @@ class AssistantAgent:
         self.memory.add_message("assistant", fallback_reply)
         return fallback_reply
 
-    def run_stream(self, user_input: str):
+    def run_stream(self, user_input: str, display_input: str | None = None):
         """Process user input and stream response tokens in real-time."""
         if self.messages and self.messages[0].get("role") == "system":
             self.messages[0] = {"role": "system", "content": build_system_prompt()}
@@ -169,7 +185,7 @@ class AssistantAgent:
         if len(self.messages) > 25:
             self.messages = [self.messages[0]] + self.messages[-20:]
 
-        self.memory.add_message("user", user_input)
+        self.memory.add_message("user", display_input or user_input)
         self.messages.append({"role": "user", "content": user_input})
 
         # Ensure all tool messages in history have a name (required by Harmony / vLLM / Groq)
@@ -191,6 +207,7 @@ class AssistantAgent:
                     messages=prune_old_tool_messages(self.messages),
                     tools=active_tools,
                     tool_choice="auto",
+                    max_tokens=2048,
                 )
             except Exception as exc:
                 err_msg = f"LLM error: {exc}"
@@ -229,12 +246,16 @@ class AssistantAgent:
                     else:
                         result = execute_tool(call.function.name, args)
 
+                    raw_tool_content = json.dumps(result)
+                    if len(raw_tool_content) > 2000:
+                        raw_tool_content = raw_tool_content[:2000] + "... [truncated to fit token limit]"
+
                     self.messages.append(
                         {
                             "role": "tool",
                             "tool_call_id": call.id,
                             "name": call.function.name,
-                            "content": json.dumps(result),
+                            "content": raw_tool_content,
                         }
                     )
                 continue

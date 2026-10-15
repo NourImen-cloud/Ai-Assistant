@@ -7,7 +7,7 @@ from typing import Any
 from assistant.tools.paths import ensure_within_home, resolve_path
 
 
-def read_document(file_path: str, max_chars: int = 5000) -> dict[str, Any]:
+def read_document(file_path: str, max_chars: int = 2500) -> dict[str, Any]:
     """Read content from PDF, Word (docx), text, markdown, or code files."""
     try:
         path = ensure_within_home(resolve_path(file_path))
@@ -82,7 +82,7 @@ def read_document(file_path: str, max_chars: int = 5000) -> dict[str, Any]:
 
 def summarize_document(file_path: str, focus_topic: str = "") -> dict[str, Any]:
     """Read a document and prepare an executive summary extract for the assistant."""
-    read_res = read_document(file_path, max_chars=8000)
+    read_res = read_document(file_path, max_chars=2500)
     if read_res.get("status") != "success":
         return read_res
 

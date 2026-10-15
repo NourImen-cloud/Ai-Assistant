@@ -1,7 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import "./App.css";
 
-const API = import.meta.env.VITE_API_URL || "http://127.0.0.1:8001";
+const API =
+  import.meta.env.VITE_API_URL !== undefined
+    ? import.meta.env.VITE_API_URL
+    : window.location.port === "5173"
+    ? "http://127.0.0.1:8001"
+    : "";
 
 // SVG Icons
 const ChatIcon = () => (
@@ -105,6 +110,12 @@ const TrashIcon = () => (
   </svg>
 );
 
+const PaperclipIcon = () => (
+  <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
+  </svg>
+);
+
 // Animated Fluid Organic Vortex Waveform
 function FluidVortex({ isActive, size = 320 }) {
   const canvasRef = useRef(null);
@@ -184,9 +195,7 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [provider, setProvider] = useState("Connecting to Echo Mind...");
   const [voiceStatus, setVoiceStatus] = useState("Tap mic to speak with Echo Mind");
-  const [lastSpeech, setLastSpeech] = useState(
-    "Fluid organic shapes dance across the canvas, conveying a sense of harmony in this abstract design."
-  );
+  const [lastSpeech, setLastSpeech] = useState();
 
   // Gmail Copilot State
   const [gmailStatus, setGmailStatus] = useState({ configured: false, email: "", connected: false, message: "" });
@@ -203,11 +212,151 @@ export default function App() {
   const [draftBody, setDraftBody] = useState("");
   const [draftResult, setDraftResult] = useState("");
   const [draftLoading, setDraftLoading] = useState(false);
+  // User Name State
+  const [userName, setUserName] = useState("User");
+  const [editingName, setEditingName] = useState(false);
+  const [tempName, setTempName] = useState("");
+
+  // Task Creation & Notifications State
+  const [newTodoTitle, setNewTodoTitle] = useState("");
+  const [newTodoDueDate, setNewTodoDueDate] = useState("");
+  const [showNewTodoForm, setShowNewTodoForm] = useState(false);
+  const [notifications, setNotifications] = useState([]);
+  const notifiedTasksRef = useRef(new Set());
+
+  // Event Creation State
+  const [newEventTitle, setNewEventTitle] = useState("");
+  const [newEventDate, setNewEventDate] = useState("");
+  const [newEventTime, setNewEventTime] = useState("");
+  const [showNewEventForm, setShowNewEventForm] = useState(false);
+
+  // File Attachment State (like ChatGPT)
+  const [attachedFiles, setAttachedFiles] = useState([]);
+  const [uploadingFile, setUploadingFile] = useState(false);
+  const [isDraggingOver, setIsDraggingOver] = useState(false);
+  const fileInputRef = useRef(null);
+
+  // Notification Center Dropdown State
+  const [showNotificationsDropdown, setShowNotificationsDropdown] = useState(false);
+  const notifDropdownRef = useRef(null);
 
   const bottomRef = useRef(null);
 
+  // Request native Windows/browser notification permissions on first load
+  useEffect(() => {
+    if ("Notification" in window && Notification.permission === "default") {
+      Notification.requestPermission().catch(() => {});
+    }
+  }, []);
+
+  // Close notifications dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (notifDropdownRef.current && !notifDropdownRef.current.contains(e.target)) {
+        setShowNotificationsDropdown(false);
+      }
+    };
+    if (showNotificationsDropdown) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showNotificationsDropdown]);
+
+  const playNotificationSound = () => {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(587.33, ctx.currentTime);
+      osc.frequency.setValueAtTime(880, ctx.currentTime + 0.12);
+      gain.gain.setValueAtTime(0.2, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.35);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.35);
+    } catch {}
+  };
+
+  // Check upcoming tasks approaching due time (within 30 minutes)
+  useEffect(() => {
+    if (!Array.isArray(todos) || todos.length === 0) return;
+
+    const checkDueTasks = () => {
+      const now = new Date();
+      todos.forEach((task) => {
+        if (task.status === "completed" || !task.due_date) return;
+
+        let dueDateObj = null;
+        const raw = String(task.due_date).trim();
+
+        // 1. Try ISO or standard Date parse
+        const parsed = new Date(raw.replace(" ", "T"));
+        if (!isNaN(parsed.getTime())) {
+          dueDateObj = parsed;
+        } else {
+          // 2. Try time like "14:30" or "2:30 PM"
+          const timeMatch = raw.match(/^(\d{1,2}):(\d{2})\s*(am|pm)?$/i);
+          if (timeMatch) {
+            let hrs = parseInt(timeMatch[1], 10);
+            const mins = parseInt(timeMatch[2], 10);
+            const meridiem = (timeMatch[3] || "").toLowerCase();
+            if (meridiem === "pm" && hrs < 12) hrs += 12;
+            if (meridiem === "am" && hrs === 12) hrs = 0;
+            dueDateObj = new Date();
+            dueDateObj.setHours(hrs, mins, 0, 0);
+          }
+        }
+
+        if (!dueDateObj) return;
+
+        const diffMinutes = (dueDateObj.getTime() - now.getTime()) / 60000;
+
+        // Alert if due in <= 30 minutes and not overdue by more than 2 hours
+        if (diffMinutes <= 30 && diffMinutes >= -120) {
+          const alertKey = `${task.id}-${task.due_date}`;
+          if (!notifiedTasksRef.current.has(alertKey)) {
+            notifiedTasksRef.current.add(alertKey);
+
+            const alertText =
+              diffMinutes > 0
+                ? `"${task.title}" is due in ${Math.round(diffMinutes)} minutes!`
+                : `"${task.title}" is due right now!`;
+
+            // Native Windows notification
+            if ("Notification" in window && Notification.permission === "granted") {
+              try {
+                new Notification("⏰ Echo Mind: Task Approaching!", {
+                  body: alertText,
+                });
+              } catch {}
+            }
+
+            playNotificationSound();
+
+            setNotifications((prev) => [
+              ...prev,
+              {
+                id: alertKey,
+                taskId: task.id,
+                title: task.title,
+                text: alertText,
+              },
+            ]);
+          }
+        }
+      });
+    };
+
+    checkDueTasks();
+    const interval = setInterval(checkDueTasks, 20000);
+    return () => clearInterval(interval);
+  }, [todos]);
+
   useEffect(() => {
     fetchHealth();
+    fetchUserProfile();
     fetchHistory();
     fetchWorkflows();
     fetchTodos();
@@ -218,6 +367,33 @@ export default function App() {
     const interval = setInterval(fetchSystem, 15000);
     return () => clearInterval(interval);
   }, []);
+
+  const fetchUserProfile = () => {
+    fetch(`${API}/user/profile`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.name) {
+          setUserName(d.name);
+          setTempName(d.name);
+        }
+      })
+      .catch(() => {});
+  };
+
+  const saveUserName = (newName) => {
+    const trimmed = (newName || "").trim();
+    if (!trimmed) {
+      setEditingName(false);
+      return;
+    }
+    setUserName(trimmed);
+    setEditingName(false);
+    fetch(`${API}/user/profile`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: trimmed }),
+    }).catch(() => {});
+  };
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -259,7 +435,7 @@ export default function App() {
   const saveGmailConfig = (e) => {
     e.preventDefault();
     if (!gmailEmailInput.trim() || !gmailPasswordInput.trim()) {
-      setGmailConfigStatus("❌ Please enter both email and App Password.");
+      setGmailConfigStatus("Please enter both email and App Password.");
       return;
     }
     setGmailConfigStatus("Verifying connection to Gmail...");
@@ -274,7 +450,7 @@ export default function App() {
       .then((r) => r.json())
       .then((d) => {
         if (d.success) {
-          setGmailConfigStatus("✅ Connected successfully!");
+          setGmailConfigStatus(" Connected successfully!");
           fetchGmailStatus();
           fetchGmailMessages();
           setTimeout(() => {
@@ -282,10 +458,10 @@ export default function App() {
             setConnectCardDismissed(true);
           }, 1200);
         } else {
-          setGmailConfigStatus(`❌ ${d.error || "Connection failed. Please check credentials."}`);
+          setGmailConfigStatus(` ${d.error || "Connection failed. Please check credentials."}`);
         }
       })
-      .catch((err) => setGmailConfigStatus(`❌ Error: ${err.message}`));
+      .catch((err) => setGmailConfigStatus(` Error: ${err.message}`));
   };
 
   const handleDisconnectGmail = async () => {
@@ -311,7 +487,7 @@ export default function App() {
   const handleCreateDraft = (e) => {
     e.preventDefault();
     if (!draftRecipient.trim() || !draftSubject.trim() || !draftBody.trim()) {
-      setDraftResult("❌ Please fill recipient, subject, and body.");
+      setDraftResult(" Please fill recipient, subject, and body.");
       return;
     }
     setDraftLoading(true);
@@ -328,22 +504,22 @@ export default function App() {
       .then((r) => r.json())
       .then((d) => {
         if (d.status === "success") {
-          setDraftResult(`✅ ${d.message}`);
+          setDraftResult(` ${d.message}`);
           setDraftSubject("");
           setDraftBody("");
           setDraftRecipient("");
         } else {
-          setDraftResult(`❌ ${d.message}`);
+          setDraftResult(` ${d.message}`);
         }
       })
-      .catch((err) => setDraftResult(`❌ Error: ${err.message}`))
+      .catch((err) => setDraftResult(` Error: ${err.message}`))
       .finally(() => setDraftLoading(false));
   };
 
   const handleSendDirect = (e) => {
     e.preventDefault();
     if (!draftRecipient.trim() || !draftSubject.trim() || !draftBody.trim()) {
-      setDraftResult("❌ Please fill recipient, subject, and body.");
+      setDraftResult(" Please fill recipient, subject, and body.");
       return;
     }
     if (!window.confirm(`Send email directly to ${draftRecipient}?`)) return;
@@ -361,15 +537,15 @@ export default function App() {
       .then((r) => r.json())
       .then((d) => {
         if (d.status === "success") {
-          setDraftResult(`✅ ${d.message}`);
+          setDraftResult(` ${d.message}`);
           setDraftSubject("");
           setDraftBody("");
           setDraftRecipient("");
         } else {
-          setDraftResult(`❌ ${d.message}`);
+          setDraftResult(` ${d.message}`);
         }
       })
-      .catch((err) => setDraftResult(`❌ Error: ${err.message}`))
+      .catch((err) => setDraftResult(` Error: ${err.message}`))
       .finally(() => setDraftLoading(false));
   };
 
@@ -442,36 +618,181 @@ export default function App() {
     }
   };
 
-  const deleteTodo = async (id, e) => {
-    if (e) e.stopPropagation();
+  const deleteTodo = async (id, clickEvt) => {
+    if (clickEvt) clickEvt.stopPropagation();
+    if (id === undefined || id === null) {
+      console.warn("deleteTodo called with invalid id:", id);
+      return;
+    }
+    // Optimistic UI update
+    setTodos((prev) => prev.filter((item) => item.id !== id));
     try {
       await fetch(`${API}/todos/${id}`, { method: "DELETE" });
       fetchTodos();
-    } catch (e) {
-      console.error("Failed to delete todo:", e);
+    } catch (err) {
+      console.error("Failed to delete todo:", err);
+      fetchTodos();
     }
   };
 
-  const deleteEvent = async (id, e) => {
-    if (e) e.stopPropagation();
+  const handleCreateNewTodo = async (e) => {
+    e.preventDefault();
+    if (!newTodoTitle.trim()) return;
+    try {
+      await fetch(`${API}/todos`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: newTodoTitle.trim(),
+          due_date: newTodoDueDate.trim(),
+        }),
+      });
+      setNewTodoTitle("");
+      setNewTodoDueDate("");
+      setShowNewTodoForm(false);
+      fetchTodos();
+    } catch (err) {
+      console.error("Failed to create todo:", err);
+    }
+  };
+
+  const deleteEvent = async (id, clickEvt) => {
+    if (clickEvt) clickEvt.stopPropagation();
+    if (id === undefined || id === null) {
+      console.warn("deleteEvent called with invalid id:", id);
+      return;
+    }
+    // Optimistic UI update
+    setEvents((prev) => prev.filter((item) => item.id !== id));
     try {
       await fetch(`${API}/events/${id}`, { method: "DELETE" });
       fetchEvents();
-    } catch (e) {
-      console.error("Failed to delete event:", e);
+    } catch (err) {
+      console.error("Failed to delete event:", err);
+      fetchEvents();
     }
   };
 
+  const handleCreateNewEvent = async (e) => {
+    e.preventDefault();
+    if (!newEventTitle.trim() || !newEventDate.trim()) return;
+    try {
+      await fetch(`${API}/events`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: newEventTitle.trim(),
+          date: newEventDate.trim(),
+          time: newEventTime.trim(),
+        }),
+      });
+      setNewEventTitle("");
+      setNewEventDate("");
+      setNewEventTime("");
+      setShowNewEventForm(false);
+      fetchEvents();
+    } catch (err) {
+      console.error("Failed to create event:", err);
+    }
+  };
+
+  const getFileIcon = (type, filename = "") => {
+    const ext = (filename.split(".").pop() || "").toLowerCase();
+    if (type === "pdf" || ext === "pdf") return "📄";
+    if (type === "docx" || ext === "docx" || ext === "doc") return "📝";
+    if (type === "data" || ext === "csv" || ext === "tsv" || ext === "xlsx" || ext === "xls") return "📊";
+    if (type === "image" || ["png", "jpg", "jpeg", "webp", "gif"].includes(ext)) return "🖼️";
+    if (type === "code" || ["py", "js", "jsx", "ts", "tsx", "html", "css", "json", "sql"].includes(ext)) return "💻";
+    return "📎";
+  };
+
+  const formatFileSize = (bytes) => {
+    if (!bytes || bytes === 0) return "";
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  const readFileAsText = (file) => {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = (e) => resolve(e.target.result || "");
+      reader.onerror = () => resolve("");
+      reader.readAsText(file);
+    });
+  };
+
+  const handleUploadFiles = async (fileList) => {
+    if (!fileList || fileList.length === 0) return;
+    setUploadingFile(true);
+    const newAttachments = [];
+
+    for (const file of Array.from(fileList)) {
+      let uploaded = false;
+
+      // 1. Try backend /upload endpoint
+      try {
+        const formData = new FormData();
+        formData.append("file", file);
+
+        const res = await fetch(`${API}/upload`, {
+          method: "POST",
+          body: formData,
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.status === "success") {
+            newAttachments.push({
+              filename: data.filename || file.name,
+              file_path: data.file_path || file.name,
+              extracted_text: data.extracted_text || "",
+              file_type: data.file_type || "document",
+              file_size: data.file_size || file.size,
+            });
+            uploaded = true;
+          }
+        }
+      } catch (err) {
+        console.warn("Backend upload failed, attempting browser fallback:", err);
+      }
+
+      // 2. Client-side fallback if backend was unreachable
+      if (!uploaded) {
+        const ext = (file.name.split(".").pop() || "").toLowerCase();
+        let extracted = "";
+        if (["csv", "tsv", "txt", "md", "json", "py", "js", "html", "css", "sql"].includes(ext)) {
+          extracted = await readFileAsText(file);
+        }
+        newAttachments.push({
+          filename: file.name,
+          file_path: file.name,
+          extracted_text: extracted ? extracted.slice(0, 8000) : `[Attached local file: ${file.name}]`,
+          file_type: ext === "csv" || ext === "tsv" ? "data" : "document",
+          file_size: file.size,
+        });
+      }
+    }
+
+    if (newAttachments.length > 0) {
+      setAttachedFiles((prev) => [...prev, ...newAttachments]);
+    }
+    setUploadingFile(false);
+  };
+
   async function sendMessage(text) {
-    const trimmed = text.trim();
-    if (!trimmed || loading) return;
+    const trimmed = text ? text.trim() : "";
+    if ((!trimmed && attachedFiles.length === 0) || loading) return;
+
+    const filesToSend = [...attachedFiles];
+    const displayMessage = trimmed || (filesToSend.length > 0 ? `Please analyze: ${filesToSend.map((f) => f.filename).join(", ")}` : "");
 
     setMessages((m) => [
       ...m,
-      { role: "user", content: trimmed },
+      { role: "user", content: displayMessage, files: filesToSend },
       { role: "assistant", content: "" },
     ]);
     setInput("");
+    setAttachedFiles([]);
     setLoading(true);
 
     let accumulatedReply = "";
@@ -480,7 +801,7 @@ export default function App() {
       const res = await fetch(`${API}/chat/stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: trimmed }),
+        body: JSON.stringify({ message: trimmed, files: filesToSend }),
       });
 
       if (!res.ok || !res.body) {
@@ -532,7 +853,7 @@ export default function App() {
         const fallbackRes = await fetch(`${API}/chat`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ message: trimmed }),
+          body: JSON.stringify({ message: trimmed, files: filesToSend }),
         });
         if (!fallbackRes.ok) {
           const errData = await fallbackRes.json().catch(() => ({}));
@@ -547,6 +868,9 @@ export default function App() {
         });
         setLastSpeech(fallbackReply);
         fetchHistory();
+        fetchTodos();
+        fetchEvents();
+        fetchSystem();
       } catch (err) {
         setMessages((prev) => {
           const next = [...prev];
@@ -593,7 +917,7 @@ export default function App() {
     try {
       await fetch(`${API}/reset`, { method: "POST" });
       setMessages([]);
-      setLastSpeech("Session reset. How can I assist you, Nour?");
+      setLastSpeech(`Session reset. How can I assist you, ${userName}?`);
     } catch {}
   }
 
@@ -629,17 +953,48 @@ export default function App() {
           </div>
         </div>
 
-        {/* User Profile Card (Nour) */}
+        {/* User Profile Card */}
         <div className="user-profile-badge">
           <div className="avatar-ring">
-            <div className="user-avatar-initial">N</div>
+            <div className="user-avatar-initial">{userName ? userName.charAt(0).toUpperCase() : "U"}</div>
           </div>
           <div className="profile-info">
-            <h4 className="profile-name">Nour</h4>
-            <span className="profile-status">
-              <span className="online-indicator"></span>
-              {provider.includes("groq") ? "Groq ⚡ Turbo" : "Ready"}
-            </span>
+            {editingName ? (
+              <input
+                type="text"
+                value={tempName}
+                autoFocus
+                onChange={(e) => setTempName(e.target.value)}
+                onBlur={() => saveUserName(tempName)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") saveUserName(tempName);
+                  if (e.key === "Escape") setEditingName(false);
+                }}
+                className="profile-name-input"
+                style={{
+                  background: "#1e1e38",
+                  color: "#fff",
+                  border: "1px solid #00f2fe",
+                  borderRadius: "4px",
+                  padding: "2px 6px",
+                  fontSize: "0.85rem",
+                  width: "110px",
+                }}
+              />
+            ) : (
+              <h4
+                className="profile-name"
+                title="Click to change your name"
+                style={{ cursor: "pointer" }}
+                onClick={() => {
+                  setTempName(userName);
+                  setEditingName(true);
+                }}
+              >
+                {userName} <span style={{ fontSize: "0.7rem", opacity: 0.6 }}>✏️</span>
+              </h4>
+            )}
+          
           </div>
         </div>
 
@@ -701,11 +1056,7 @@ export default function App() {
           >
             <MailIcon />
             <span>Gmail Copilot</span>
-            {gmailStatus.configured && (
-              <span className="nav-counter" style={{ background: "#10b981", color: "#fff" }}>
-                ✓
-              </span>
-            )}
+          
           </button>
         </nav>
 
@@ -730,7 +1081,7 @@ export default function App() {
         <header className="desktop-top-header">
           <div className="header-greeting">
             <h1>
-              Welcome back, <span className="name-highlight">Nour</span>!
+              Welcome back, <span className="name-highlight">{userName}</span>!
             </h1>
             <p>Your AI copilot is equipped with document, data, research, and system automation tools.</p>
           </div>
@@ -744,12 +1095,171 @@ export default function App() {
               <span>RAM: {systemStats.ram_percent}% ({systemStats.ram_used_gb} GB)</span>
             </div>
 
-            <button className="header-icon-btn" onClick={() => { fetchHistory(); fetchTodos(); fetchSystem(); }} title="Refresh All">
-              <BellIcon />
-              <span className="badge-ping"></span>
-            </button>
+            <div className="header-notifications-wrapper" ref={notifDropdownRef}>
+              <button
+                className={`header-icon-btn ${showNotificationsDropdown ? "active" : ""}`}
+                onClick={() => {
+                  fetchTodos();
+                  fetchEvents();
+                  setShowNotificationsDropdown((prev) => !prev);
+                }}
+                title="Notifications & Upcoming Tasks"
+              >
+                <BellIcon />
+                {(notifications.length > 0 || todos.filter((t) => t.status === "pending" && t.due_date).length > 0) && (
+                  <span className="badge-ping"></span>
+                )}
+                {notifications.length > 0 && (
+                  <span className="notif-badge-pill">{notifications.length}</span>
+                )}
+              </button>
+
+              {/* Notifications Popover Dropdown */}
+              {showNotificationsDropdown && (
+                <div className="notifications-dropdown-menu">
+                  <div className="dropdown-header">
+                    <div className="dropdown-title">
+                      <span className="title-icon">🔔</span>
+                      <h4>Notifications & Deadlines</h4>
+                    </div>
+                    {notifications.length > 0 && (
+                      <button
+                        className="clear-all-notifs-btn"
+                        onClick={() => setNotifications([])}
+                      >
+                        Dismiss All
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="dropdown-body-scroll">
+                    {/* 1. Approaching Alerts (High Priority) */}
+                    {notifications.length > 0 && (
+                      <div className="dropdown-section">
+                        <div className="section-label-alert">
+                          <span>⏰ Approaching Deadlines</span>
+                        </div>
+                        {notifications.map((notif) => (
+                          <div key={notif.id} className="dropdown-alert-card">
+                            <div className="alert-card-info">
+                              <span className="alert-card-title">{notif.title}</span>
+                              <p className="alert-card-sub">{notif.text}</p>
+                            </div>
+                            <div className="alert-card-actions">
+                              <button
+                                className="alert-btn-complete"
+                                onClick={() => {
+                                  toggleTodo(notif.taskId);
+                                  setNotifications((prev) => prev.filter((n) => n.id !== notif.id));
+                                }}
+                                title="Mark as completed"
+                              >
+                                ✓
+                              </button>
+                              <button
+                                className="alert-btn-dismiss"
+                                onClick={() => setNotifications((prev) => prev.filter((n) => n.id !== notif.id))}
+                                title="Dismiss"
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* 2. Tasks Due Soon */}
+                    {todos.filter((t) => t.status === "pending" && t.due_date).length > 0 && (
+                      <div className="dropdown-section">
+                        <div className="section-label">
+                          <span>Upcoming Tasks With Due Dates</span>
+                        </div>
+                        {todos
+                          .filter((t) => t.status === "pending" && t.due_date)
+                          .slice(0, 5)
+                          .map((task) => (
+                            <div key={task.id} className="dropdown-task-row">
+                              <input
+                                type="checkbox"
+                                checked={task.status === "completed"}
+                                onChange={() => toggleTodo(task.id)}
+                              />
+                              <div className="dropdown-task-text">
+                                <span className="dropdown-task-title">{task.title}</span>
+                                <span className="dropdown-task-due">Due: {task.due_date}</span>
+                              </div>
+                            </div>
+                          ))}
+                      </div>
+                    )}
+
+                    {/* Empty State */}
+                    {notifications.length === 0 &&
+                      todos.filter((t) => t.status === "pending" && t.due_date).length === 0 && (
+                        <div className="dropdown-empty-state">
+                          <p className="empty-title">You're all caught up!</p>
+                          <span className="empty-subtitle">No approaching deadlines or urgent alerts right now.</span>
+                        </div>
+                      )}
+                  </div>
+
+                  <div className="dropdown-footer">
+                    <button
+                      className="dropdown-footer-link"
+                      onClick={() => {
+                        setActiveTab("agenda");
+                        setShowNotificationsDropdown(false);
+                      }}
+                    >
+                      Open Tasks & Agenda Studio ›
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </header>
+
+        {/* Floating Approaching Task Notifications */}
+        {notifications.length > 0 && (
+          <div className="floating-notifications-container">
+            {notifications.map((notif) => (
+              <div key={notif.id} className="task-notification-toast">
+                <div className="notif-header">
+                  <strong>
+                    <span className="notif-icon">⏰</span> Task Approaching!
+                  </strong>
+                  <button
+                    className="notif-close-btn"
+                    onClick={() => setNotifications((prev) => prev.filter((n) => n.id !== notif.id))}
+                    title="Dismiss notification"
+                  >
+                    ✕
+                  </button>
+                </div>
+                <p className="notif-body">{notif.text}</p>
+                <div className="notif-actions">
+                  <button
+                    className="notif-btn-complete"
+                    onClick={() => {
+                      toggleTodo(notif.taskId);
+                      setNotifications((prev) => prev.filter((n) => n.id !== notif.id));
+                    }}
+                  >
+                    ✓ Complete Task
+                  </button>
+                  <button
+                    className="notif-btn-dismiss"
+                    onClick={() => setNotifications((prev) => prev.filter((n) => n.id !== notif.id))}
+                  >
+                    Snooze
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* Content Views */}
         <div className="workspace-scroll-area">
@@ -777,7 +1287,7 @@ export default function App() {
                   <div className="card-content-block">
                     <span className="card-subtitle">Talk with</span>
                     <h3 className="card-main-title">Echo Mind</h3>
-                    <p className="card-desc">Sub-second Whisper Turbo voice recognition with live fluid soundwave visualization and async speech.</p>
+                    <p className="card-desc">Sub-second Whisper Turbo voice recognition .</p>
                   </div>
                   <div className="card-arrow-pill voice-pill">Voice Mode ›</div>
                 </div>
@@ -915,7 +1425,7 @@ export default function App() {
                         <path d="M 44 54 Q 50 57 56 54" fill="none" stroke="#00f2fe" strokeWidth="2" strokeLinecap="round" />
                       </svg>
                     </div>
-                    <h2>How can Echo Mind empower your day, Nour?</h2>
+                    <h2>How can Echo Mind empower your day, {userName}?</h2>
                     <p>I can read your documents, analyze spreadsheets, research topics online, check PC health, or manage your schedule.</p>
                     <div className="suggestion-chips-grid">
                       <button onClick={() => sendMessage("Give me my daily briefing with pending tasks, agenda, and PC health")}>
@@ -936,8 +1446,22 @@ export default function App() {
                   messages.map((msg, i) => (
                     <div key={i} className={`desktop-chat-bubble ${msg.role}`}>
                       <div className="bubble-header-tag">
-                        <span className="author-tag">{msg.role === "user" ? "Nour" : "Echo Mind"}</span>
+                        <span className="author-tag">{msg.role === "user" ? userName : "Echo Mind"}</span>
                       </div>
+                      {/* Attached files badge inside message bubble */}
+                      {msg.files && msg.files.length > 0 && (
+                        <div className="message-files-container">
+                          {msg.files.map((f, fIdx) => (
+                            <div key={fIdx} className="message-file-badge">
+                              <span className="file-badge-icon">{getFileIcon(f.file_type, f.filename)}</span>
+                              <div className="file-badge-details">
+                                <span className="file-badge-name" title={f.filename}>{f.filename}</span>
+                                <span className="file-badge-size">{formatFileSize(f.file_size)} • {f.file_type || "file"}</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                       <div className="bubble-content-text">
                         <p>{msg.content || (loading && i === messages.length - 1 ? "Thinking..." : "")}</p>
                       </div>
@@ -957,15 +1481,79 @@ export default function App() {
                 <div ref={bottomRef} />
               </div>
 
-              {/* Chat Input Dock */}
-              <div className="desktop-chat-dock">
+              {/* Attached files preview pill bar */}
+              {attachedFiles.length > 0 && (
+                <div className="attached-files-bar">
+                  {attachedFiles.map((f, idx) => (
+                    <div key={idx} className="attached-file-pill">
+                      <span className="attached-file-icon">{getFileIcon(f.file_type, f.filename)}</span>
+                      <span className="attached-file-name" title={f.filename}>{f.filename}</span>
+                      <span className="attached-file-size">{formatFileSize(f.file_size)}</span>
+                      <button
+                        type="button"
+                        className="attached-file-remove"
+                        onClick={() => setAttachedFiles((prev) => prev.filter((_, i) => i !== idx))}
+                        title="Remove file"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                  {uploadingFile && <span className="upload-indicator">Uploading & parsing...</span>}
+                </div>
+              )}
+
+              {/* Chat Input Dock with Drag & Drop */}
+              <div
+                className={`desktop-chat-dock ${isDraggingOver ? "dock-drag-active" : ""}`}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setIsDraggingOver(true);
+                }}
+                onDragLeave={() => setIsDraggingOver(false)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setIsDraggingOver(false);
+                  if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                    handleUploadFiles(e.dataTransfer.files);
+                  }
+                }}
+              >
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  style={{ display: "none" }}
+                  accept=".csv,.xlsx,.xls,.tsv,.pdf,.docx,.doc,.txt,.md,.json,.py,.js,.html,.css,.png,.jpg,.jpeg,.webp"
+                  multiple
+                  onChange={(e) => {
+                    if (e.target.files && e.target.files.length > 0) {
+                      handleUploadFiles(e.target.files);
+                    }
+                    e.target.value = "";
+                  }}
+                />
+                <button
+                  type="button"
+                  className="dock-action-btn attach-btn"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={loading || uploadingFile}
+                  title="Attach files (PDF, Word, CSV, Excel, Code, Images)"
+                >
+                  <PaperclipIcon />
+                </button>
                 <input
                   type="text"
-                  placeholder="Ask Echo Mind to analyze files, research online, create charts, or manage tasks..."
+                  placeholder={
+                    uploadingFile
+                      ? "Uploading & extracting document..."
+                      : attachedFiles.length > 0
+                      ? `Ask Echo Mind about ${attachedFiles.length} attached file(s)...`
+                      : "Ask Echo Mind to analyze files, research online, create charts, or manage tasks..."
+                  }
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && sendMessage(input)}
-                  disabled={loading}
+                  disabled={loading || uploadingFile}
                 />
                 <button
                   className="dock-action-btn mic-btn"
@@ -978,7 +1566,7 @@ export default function App() {
                 <button
                   className="dock-send-button"
                   onClick={() => sendMessage(input)}
-                  disabled={loading || !input.trim()}
+                  disabled={loading || uploadingFile || (!input.trim() && attachedFiles.length === 0)}
                 >
                   Send
                 </button>
@@ -1037,10 +1625,49 @@ export default function App() {
                 <div className="agenda-card-panel">
                   <div className="panel-header-line">
                     <h3>To-Do Tasks ({todos.length})</h3>
-                    <button className="small-action-btn" onClick={() => handleQuickPrompt("Add a task to ")}>
-                      + New Task
+                    <button
+                      className="small-action-btn"
+                      onClick={() => setShowNewTodoForm((prev) => !prev)}
+                    >
+                      {showNewTodoForm ? "✕ Cancel" : "+ New Task"}
                     </button>
                   </div>
+
+                  {showNewTodoForm && (
+                    <form className="inline-add-task-form" onSubmit={handleCreateNewTodo}>
+                      <input
+                        type="text"
+                        className="new-task-input"
+                        placeholder="What do you need to get done?"
+                        value={newTodoTitle}
+                        onChange={(e) => setNewTodoTitle(e.target.value)}
+                        autoFocus
+                      />
+                      <div className="inline-add-task-row">
+                        <input
+                          type="text"
+                          className="new-task-date-input"
+                          placeholder="Due (e.g. 15:30, 2026-10-15 17:00)"
+                          value={newTodoDueDate}
+                          onChange={(e) => setNewTodoDueDate(e.target.value)}
+                        />
+                        <button type="submit" className="new-task-submit-btn">
+                          Add Task
+                        </button>
+                        <button
+                          type="button"
+                          className="new-task-cancel-btn"
+                          onClick={() => {
+                            setShowNewTodoForm(false);
+                            setNewTodoTitle("");
+                            setNewTodoDueDate("");
+                          }}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </form>
+                  )}
                   <div className="agenda-items-scroll">
                     {todos.length === 0 ? (
                       <p className="agenda-empty-text">No tasks recorded. Add one using voice or chat!</p>
@@ -1072,28 +1699,77 @@ export default function App() {
                 {/* Calendar Events Column */}
                 <div className="agenda-card-panel">
                   <div className="panel-header-line">
-                    <h3>Upcoming Events & Meetings</h3>
-                    <button className="small-action-btn" onClick={() => handleQuickPrompt("Schedule an event for ")}>
-                      + New Event
+                    <h3>Upcoming Events & Meetings ({events.length})</h3>
+                    <button
+                      className="small-action-btn"
+                      onClick={() => setShowNewEventForm((prev) => !prev)}
+                    >
+                      {showNewEventForm ? "✕ Cancel" : "+ New Event"}
                     </button>
                   </div>
+
+                  {showNewEventForm && (
+                    <form className="inline-add-task-form" onSubmit={handleCreateNewEvent}>
+                      <input
+                        type="text"
+                        className="new-task-input"
+                        placeholder="Meeting or event title..."
+                        value={newEventTitle}
+                        onChange={(e) => setNewEventTitle(e.target.value)}
+                        autoFocus
+                      />
+                      <div className="inline-add-task-row">
+                        <input
+                          type="text"
+                          className="new-task-date-input"
+                          placeholder="Date (e.g. 2026-10-16, Today)"
+                          value={newEventDate}
+                          onChange={(e) => setNewEventDate(e.target.value)}
+                        />
+                        <input
+                          type="text"
+                          className="new-task-date-input"
+                          placeholder="Time (e.g. 14:00, 2:30 PM)"
+                          style={{ maxWidth: "130px" }}
+                          value={newEventTime}
+                          onChange={(e) => setNewEventTime(e.target.value)}
+                        />
+                        <button type="submit" className="new-task-submit-btn">
+                          Schedule
+                        </button>
+                        <button
+                          type="button"
+                          className="new-task-cancel-btn"
+                          onClick={() => {
+                            setShowNewEventForm(false);
+                            setNewEventTitle("");
+                            setNewEventDate("");
+                            setNewEventTime("");
+                          }}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </form>
+                  )}
+
                   <div className="agenda-items-scroll">
                     {events.length === 0 ? (
                       <p className="agenda-empty-text">No calendar events scheduled.</p>
                     ) : (
-                      events.map((e) => (
-                        <div key={e.id} className="agenda-item-card event-card">
+                      events.map((evt) => (
+                        <div key={evt.id} className="agenda-item-card event-card">
                           <div className="event-date-badge">
-                            <span>{e.date}</span>
-                            {e.time && <small>{e.time}</small>}
+                            <span>{evt.date}</span>
+                            {evt.time && <small>{evt.time}</small>}
                           </div>
                           <div className="agenda-item-info">
-                            <h4 className="agenda-item-title">{e.title}</h4>
-                            {e.notes && <p className="agenda-item-notes">{e.notes}</p>}
+                            <h4 className="agenda-item-title">{evt.title}</h4>
+                            {evt.notes && <p className="agenda-item-notes">{evt.notes}</p>}
                           </div>
                           <button
                             className="task-delete-btn"
-                            onClick={(e) => deleteEvent(e.id, e)}
+                            onClick={(clickEvt) => deleteEvent(evt.id, clickEvt)}
                             title="Delete event"
                           >
                             <TrashIcon />
@@ -1225,28 +1901,39 @@ export default function App() {
                   </div>
 
                   <div className="gmail-messages-list">
-                    {gmailMessages.length === 0 ? (
+                    {!Array.isArray(gmailMessages) || gmailMessages.length === 0 ? (
                       <div className="agenda-empty-text">
                         {gmailLoading
                           ? "Fetching emails from Gmail..."
-                          : gmailStatus.configured
+                          : gmailStatus?.configured
                           ? "No recent emails found in inbox. Click 'Refresh Inbox' to sync."
                           : "Configure your Gmail credentials below to view your inbox."}
                       </div>
                     ) : (
-                      gmailMessages.map((msg) => (
-                        <div key={msg.id} className="gmail-message-item">
+                      gmailMessages.map((msg, idx) => (
+                        <div key={msg.id || idx} className="gmail-message-item">
                           <div className="gmail-msg-top">
-                            <span className="gmail-msg-from">{msg.from}</span>
-                            <span>{msg.date ? new Date(msg.date).toLocaleDateString() : ""}</span>
+                            <span className="gmail-msg-from">{msg.from || "Unknown Sender"}</span>
+                            <span>
+                              {msg.date
+                                ? (() => {
+                                    try {
+                                      const d = new Date(msg.date);
+                                      return isNaN(d.getTime()) ? String(msg.date).slice(0, 16) : d.toLocaleDateString();
+                                    } catch {
+                                      return "";
+                                    }
+                                  })()
+                                : ""}
+                            </span>
                           </div>
-                          <div className="gmail-msg-subject">{msg.subject}</div>
+                          <div className="gmail-msg-subject">{msg.subject || "(No Subject)"}</div>
                           <div className="gmail-msg-actions">
                             <button
                               className="gmail-ai-chip"
                               onClick={() => {
                                 setActiveTab("chat");
-                                sendMessage(`Read my email from ${msg.from} with subject "${msg.subject}" (ID ${msg.id}) and provide a concise summary of the action items.`);
+                                sendMessage(`Read my email from ${msg.from || "sender"} with subject "${msg.subject || ""}" (ID ${msg.id || ""}) and provide a concise summary of the action items.`);
                               }}
                             >
                               ✨ Summarize with AI
@@ -1255,7 +1942,7 @@ export default function App() {
                               className="gmail-ai-chip"
                               onClick={() => {
                                 setActiveTab("chat");
-                                sendMessage(`Read email ID ${msg.id} from ${msg.from} with subject "${msg.subject}" and draft a polite, professional reply to them.`);
+                                sendMessage(`Read email ID ${msg.id || ""} from ${msg.from || "sender"} with subject "${msg.subject || ""}" and draft a polite, professional reply to them.`);
                               }}
                             >
                               ✍️ AI Draft Reply
@@ -1270,19 +1957,21 @@ export default function App() {
                 {/* Column 2: Account Setup & Quick Compose */}
                 <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
                   {/* Connected Account Summary (Compact & Removable with ✕) */}
-                  {gmailStatus.configured && gmailStatus.connected && !showConnectCard && !hideConnectedCard && (
+                  {gmailStatus?.configured && gmailStatus?.connected && !showConnectCard && !hideConnectedCard && (
                     <div className="gmail-connected-card">
                       <div className="gmail-connected-info">
                         <div className="gmail-connected-avatar">
-                          {gmailStatus.email ? gmailStatus.email[0].toUpperCase() : "G"}
+                          {typeof gmailStatus?.email === "string" && gmailStatus.email.length > 0
+                            ? gmailStatus.email[0].toUpperCase()
+                            : "G"}
                         </div>
                         <div className="gmail-connected-details">
                           <div className="gmail-connected-header-line">
                             <span className="gmail-connected-badge-dot"></span>
                             <span className="gmail-connected-status-text">Connected Gmail</span>
                           </div>
-                          <span className="gmail-connected-email" title={gmailStatus.email}>
-                            {gmailStatus.email}
+                          <span className="gmail-connected-email" title={gmailStatus?.email || ""}>
+                            {gmailStatus?.email || ""}
                           </span>
                         </div>
                       </div>
@@ -1385,10 +2074,10 @@ export default function App() {
                         {gmailConfigStatus && (
                           <div
                             className={`gmail-alert-box ${
-                              gmailConfigStatus.includes("✅") ? "gmail-alert-success" : "gmail-alert-error"
+                              String(gmailConfigStatus).includes("✅") ? "gmail-alert-success" : "gmail-alert-error"
                             }`}
                           >
-                            {gmailConfigStatus}
+                            {String(gmailConfigStatus)}
                           </div>
                         )}
                       </form>
@@ -1453,10 +2142,10 @@ export default function App() {
                       {draftResult && (
                         <div
                           className={`gmail-alert-box ${
-                            draftResult.includes("✅") ? "gmail-alert-success" : "gmail-alert-error"
+                            String(draftResult).includes("✅") ? "gmail-alert-success" : "gmail-alert-error"
                           }`}
                         >
-                          {draftResult}
+                          {String(draftResult)}
                         </div>
                       )}
                     </form>

@@ -22,17 +22,33 @@ def manage_todo(
         tid = store.add_todo(title, due_date)
         return {"status": "success", "message": f"Added task #{tid}: '{title}'" + (f" (Due: {due_date})" if due_date else "")}
 
-    elif act == "complete":
+    elif act in {"complete", "done", "finish"}:
         if task_id is None:
-            return {"status": "error", "message": "task_id is required to complete a task."}
+            if title.strip():
+                all_todos = store.list_todos(status="all")
+                target = title.strip().lower()
+                for t in all_todos:
+                    if target in t["title"].lower():
+                        store.complete_todo(t["id"])
+                        return {"status": "success", "message": f"Completed task #{t['id']}: '{t['title']}'."}
+                return {"status": "error", "message": f"Could not find any task matching '{title}'."}
+            return {"status": "error", "message": "task_id or title is required to complete a task."}
         ok = store.complete_todo(task_id)
         if ok:
             return {"status": "success", "message": f"Completed task #{task_id}."}
         return {"status": "error", "message": f"Task #{task_id} not found."}
 
-    elif act == "delete":
+    elif act in {"delete", "remove"}:
         if task_id is None:
-            return {"status": "error", "message": "task_id is required to delete a task."}
+            if title.strip():
+                all_todos = store.list_todos(status="all")
+                target = title.strip().lower()
+                for t in all_todos:
+                    if target in t["title"].lower():
+                        store.delete_todo(t["id"])
+                        return {"status": "success", "message": f"Deleted task #{t['id']}: '{t['title']}'."}
+                return {"status": "error", "message": f"Could not find any task matching '{title}'."}
+            return {"status": "error", "message": "task_id or title is required to delete a task."}
         ok = store.delete_todo(task_id)
         if ok:
             return {"status": "success", "message": f"Deleted task #{task_id}."}
@@ -69,9 +85,17 @@ def manage_calendar(
         time_str = f" at {time}" if time else ""
         return {"status": "success", "message": f"Scheduled event #{eid}: '{title}' on {date}{time_str}."}
 
-    elif act == "delete":
+    elif act in {"delete", "remove"}:
         if event_id is None:
-            return {"status": "error", "message": "event_id is required to delete an event."}
+            if title.strip():
+                all_events = store.list_events(limit=50)
+                target = title.strip().lower()
+                for e in all_events:
+                    if target in e["title"].lower():
+                        store.delete_event(e["id"])
+                        return {"status": "success", "message": f"Deleted event #{e['id']}: '{e['title']}'."}
+                return {"status": "error", "message": f"Could not find any event matching '{title}'."}
+            return {"status": "error", "message": "event_id or title is required to delete an event."}
         ok = store.delete_event(event_id)
         if ok:
             return {"status": "success", "message": f"Deleted event #{event_id}."}
@@ -89,6 +113,18 @@ def manage_calendar(
         return {"status": "success", "message": "Upcoming Calendar Events:\n" + "\n".join(lines), "events": events}
 
 
+def _get_user_name() -> str:
+    try:
+        from assistant.tools.memory_tools import get_memory_store
+        name = get_memory_store().get_preference("user_name")
+        if name:
+            return name
+        import getpass
+        return getpass.getuser().capitalize()
+    except Exception:
+        return "User"
+
+
 def draft_email(
     recipient: str,
     subject: str,
@@ -96,8 +132,9 @@ def draft_email(
     tone: str = "professional",
 ) -> dict[str, Any]:
     """Draft a formatted email with a specified tone (professional, friendly, concise, or assertive)."""
+    user_name = _get_user_name()
     greeting = f"Dear {recipient}," if recipient else "Hello,"
-    signoff = "Best regards,\nNour"
+    signoff = f"Best regards,\n{user_name}"
 
     points_list = [p.strip() for p in key_points.split("\n") if p.strip()]
     if not points_list:
@@ -155,7 +192,7 @@ def get_daily_briefing() -> dict[str, Any]:
         pass
 
     briefing = (
-        f"☀️ Daily Briefing for Nour\n"
+        f"☀️ Daily Briefing for {_get_user_name()}\n"
         f"⏰ {now_str}\n\n"
         f"📋 Pending Tasks ({len(todos)} total):\n{todos_summary}\n\n"
         f"📅 Upcoming Agenda:\n{events_summary}\n\n"
