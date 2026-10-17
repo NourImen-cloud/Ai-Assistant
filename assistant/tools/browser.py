@@ -1,5 +1,6 @@
 """Browser automation via Playwright."""
 
+import os
 from typing import Any
 from urllib.parse import quote_plus, urlparse
 
@@ -13,6 +14,12 @@ def _ensure_page():
     global _playwright, _browser, _context, _page
     if _page is not None and not _page.is_closed():
         return _page
+
+    # Inject PLAYWRIGHT_BROWSERS_PATH here (at call time, not import time)
+    # so dotenv has already loaded by the time this runs.
+    pw_path = os.getenv("PLAYWRIGHT_BROWSERS_PATH", "")
+    if pw_path:
+        os.environ["PLAYWRIGHT_BROWSERS_PATH"] = pw_path
 
     from playwright.sync_api import sync_playwright
 

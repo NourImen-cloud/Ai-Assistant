@@ -4,8 +4,19 @@ import threading
 from typing import Any
 from pathlib import Path
 
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 # Add project root to sys.path so 'assistant' package can be imported directly
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if getattr(sys, "frozen", False):
+    PROJECT_ROOT = Path(sys.executable).resolve().parent
+else:
+    PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -34,6 +45,14 @@ agent = AssistantAgent()
 UPLOAD_DIR = PROJECT_ROOT / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
+
+SCREENSHOTS_DIR = PROJECT_ROOT / "screenshots"
+SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/screenshots", StaticFiles(directory=str(SCREENSHOTS_DIR)), name="screenshots")
+
+CHARTS_DIR = PROJECT_ROOT / "data" / "charts"
+CHARTS_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/charts", StaticFiles(directory=str(CHARTS_DIR)), name="charts")
 
 
 def extract_file_text(file_path: Path, filename: str) -> tuple[str, str]:
@@ -374,10 +393,10 @@ def remove_event(event_id: int):
 
 
 @app.get("/system/resources")
-def get_system_resources():
+def get_system_resources(include_processes: bool = False):
     """Retrieve live CPU, RAM, and disk statistics."""
     from assistant.tools.system_tools import system_resource_inspector
-    return system_resource_inspector()
+    return system_resource_inspector(include_processes=include_processes)
 
 
 @app.post("/workflows/run")
@@ -506,10 +525,17 @@ def make_gmail_draft(req: GmailDraftRequest):
 def send_gmail_direct(req: GmailDraftRequest):
     """Send an email immediately."""
     from assistant.tools.email_tools import send_gmail_message
-
+    return send_gmail_message(recipient=req.recipient, subject=req.subject, body=req.body)
 FRONTEND_DIST = PROJECT_ROOT / "frontend" / "dist"
+if not FRONTEND_DIST.exists():
+    internal_dist = PROJECT_ROOT / "_internal" / "frontend" / "dist"
+    if internal_dist.exists():
+        FRONTEND_DIST = internal_dist
+
 if FRONTEND_DIST.exists():
-    app.mount("/assets", StaticFiles(directory=str(FRONTEND_DIST / "assets")), name="assets")
+    assets_dir = FRONTEND_DIST / "assets"
+    if assets_dir.exists():
+        app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
 
     @app.get("/{full_path:path}")
     def serve_frontend(full_path: str):
@@ -522,7 +548,7 @@ if FRONTEND_DIST.exists():
 def main():
     import uvicorn
 
-    uvicorn.run("api.server:app", host=API_HOST, port=API_PORT, reload=False)
+    uvicorn.run(app, host=API_HOST, port=API_PORT)
 
 
 if __name__ == "__main__":

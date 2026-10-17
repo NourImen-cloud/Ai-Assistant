@@ -10,6 +10,7 @@ datas = [
 # Collect data files from relevant packages
 datas += collect_data_files('trafilatura')
 datas += collect_data_files('pypdf')
+datas += collect_data_files('playwright')
 
 hiddenimports = [
     'uvicorn',
@@ -46,8 +47,11 @@ hiddenimports = [
     'PIL.Image',
     'PIL.ImageGrab',
     'mss',
+    'playwright',
+    'playwright.sync_api',
 ]
 hiddenimports += collect_submodules('assistant')
+hiddenimports += collect_submodules('playwright')
 
 a = Analysis(
     ['desktop_app.py'],
@@ -106,3 +110,10 @@ coll = COLLECT(
     upx_exclude=[],
     name='EchoMind',
 )
+
+# ── Post-build: ensure .env sits next to EchoMind.exe ──────────────────────
+import shutil as _shutil, pathlib as _pathlib
+_dist_env = _pathlib.Path('dist/EchoMind/.env')
+_dist_env.parent.mkdir(parents=True, exist_ok=True)
+_shutil.copy('.env', _dist_env)
+print(f"[post-build] Copied .env -> {_dist_env.resolve()}")

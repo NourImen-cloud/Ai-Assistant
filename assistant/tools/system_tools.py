@@ -8,15 +8,26 @@ from typing import Any
 from assistant.tools.paths import ensure_within_home, resolve_path
 
 
-def system_resource_inspector() -> dict[str, Any]:
+def system_resource_inspector(include_processes: bool = True) -> dict[str, Any]:
     """Inspect real-time CPU, RAM, disk usage, and identify top memory-consuming processes."""
     try:
         import psutil
 
-        cpu_percent = psutil.cpu_percent(interval=0.2)
+        cpu_percent = psutil.cpu_percent(interval=None)
         mem = psutil.virtual_memory()
         mem_used_gb = round((mem.total - mem.available) / (1024**3), 2)
         mem_total_gb = round(mem.total / (1024**3), 2)
+
+        if not include_processes:
+            return {
+                "status": "success",
+                "message": f"CPU: {cpu_percent}%, RAM: {mem.percent}% ({mem_used_gb} GB used / {mem_total_gb} GB total)",
+                "cpu_percent": cpu_percent,
+                "ram_percent": mem.percent,
+                "ram_used_gb": mem_used_gb,
+                "ram_total_gb": mem_total_gb,
+                "processes": [],
+            }
 
         # Disks
         disk_stats = []

@@ -101,17 +101,31 @@ def take_screenshot(
 
         path = (folder / name).resolve()
 
-        # 1. Try PyAutoGUI
+        # 1. Try MSS (fastest, modern multi-monitor screen grab)
         captured = False
         try:
-            gui = _pyautogui()
-            image = gui.screenshot()
-            image.save(path)
-            captured = True
+            import mss
+            import mss.tools
+            with mss.MSS() as sct:
+                mon = sct.monitors[0]
+                sct_img = sct.grab(mon)
+                mss.tools.to_png(sct_img.rgb, sct_img.size, output=str(path))
+                if path.exists() and path.stat().st_size > 0:
+                    captured = True
         except Exception:
             pass
 
-        # 2. Fallback to PIL ImageGrab
+        # 2. Fallback to PyAutoGUI
+        if not captured:
+            try:
+                gui = _pyautogui()
+                image = gui.screenshot()
+                image.save(path)
+                captured = True
+            except Exception:
+                pass
+
+        # 3. Fallback to PIL ImageGrab
         if not captured:
             try:
                 from PIL import ImageGrab
@@ -140,7 +154,10 @@ def take_screenshot(
                 subprocess.run(
                     ["powershell", "-NoProfile", "-NonInteractive", "-EncodedCommand", enc],
                     check=True,
-                    capture_output=True,
+                    timeout=3.0,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
                 )
                 if path.exists() and path.stat().st_size > 0:
                     captured = True

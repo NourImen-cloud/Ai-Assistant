@@ -1062,51 +1062,46 @@ TOOL_CATEGORIES: dict[str, list[str]] = {
 CATEGORY_KEYWORDS: dict[str, list[str]] = {
     "research": [
         "research", "paper", "article", "arxiv", "scholar", "quantum",
-        "web", "compare", "recherch", "synth", "internet", "en ligne"
+        "academic", "recherche", "synthèse", "deep research"
     ],
     "documents": [
-        "document", "pdf", "docx", "doc", "summar", "read", "folder", "résumé", "resume", "lire"
+        "document", "pdf", "docx", "summarize doc", "read doc", "résumé doc", "lire doc"
     ],
     "data": [
-        "data", "csv", "excel", "chart", "graph", "plot", "statistic", "donnée", "donnee", "tableau"
+        "data", "csv", "excel", "chart", "graph", "plot", "statistic", "donnée", "tableau"
     ],
     "system": [
-        "system", "cpu", "ram", "disk", "memory", "temp", "clean", "scaffold", "process", "nettoy"
+        "system", "cpu", "ram", "disk", "memory usage", "temp files", "clean temp", "process", "nettoy"
     ],
     "agenda": [
         "todo", "task", "calendar", "event", "meeting", "briefing", "tâche", "tache", "agenda", "rendez-vous"
     ],
     "gmail": [
-        "gmail", "mail", "email", "inbox", "draft", "message", "courrier", "brouillon", "envoyer"
+        "gmail", "email", "inbox", "draft email", "send email", "courrier", "brouillon"
     ],
     "files": [
-        "file", "folder", "directory", "path", "find", "search", "create", "delete", "rename", "vscode", "dossier", "fichier", "cherch", "trouv", "local"
+        "file", "folder", "directory", "local file", "search file", "find file", "create folder",
+        "create file", "delete path", "delete file", "rename", "vscode", "dossier", "fichier"
     ],
     "apps": [
-        "open", "close", "launch", "app", "chrome", "calc", "terminal", "ouvr", "ferm", "lanc", "youtube", "spotify", "netflix", "chatgpt"
+        "open", "close", "launch", "app", "application", "chrome", "calc", "terminal",
+        "ouvr", "ferm", "lanc", "youtube", "spotify", "netflix", "chatgpt", "website", "url"
     ],
     "browser": [
-        "browser", "youtube", "navigate", "click", "type", "webpage", "navigateur"
+        "browser", "playwright", "click element", "page content"
     ],
     "automation": [
-        "mouse", "click", "screenshot", "screeshot", "snapshot", "printscreen", "capture", "ecran", "écran", "photo", "hotkey", "keyboard", "screen", "souris", "clavier"
+        "screenshot", "snapshot", "printscreen", "capture", "hotkey", "keyboard", "souris", "clavier"
     ],
     "memory": [
-        "preference", "project", "workflow", "save", "remember", "projet", "sauvegard"
+        "preference", "project", "workflow", "save preference", "remember", "projet", "sauvegard"
     ],
 }
 
 CORE_TOOLS = [
     "open_application",
     "open_website",
-    "search_local_files",
-    "take_screenshot",
-    "deep_web_research",
-    "get_daily_briefing",
-    "manage_todo",
-    "open_path",
-    "list_directory",
-    "get_preference",
+    "open_website_in_chrome",
 ]
 
 
@@ -1119,6 +1114,8 @@ def get_tools_for_request(query: str = "", messages: list[dict[str, Any]] | None
     text = (query or "").lower()
     if messages:
         for m in messages[-2:]:
+            if m.get("role") == "system":
+                continue
             c = m.get("content")
             if isinstance(c, str):
                 text += " " + c.lower()

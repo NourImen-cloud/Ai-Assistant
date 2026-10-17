@@ -1,7 +1,28 @@
 import os
 import subprocess
+import sys
 import webbrowser
 from typing import Any
+
+# ── subprocess helper ────────────────────────────────────────────────────────
+# PyInstaller windowed builds (console=False) leave stdin/stdout/stderr as
+# invalid handles.  Child processes that inherit them crash silently.
+# Fix: always null-out stdio and use DETACHED_PROCESS on Windows so the
+# launched app is truly independent of the parent process.
+_DETACHED = getattr(subprocess, "DETACHED_PROCESS", 0)  # 0 on non-Windows
+
+
+def _safe_popen(cmd: list[str], shell: bool = False) -> subprocess.Popen:
+    """Launch a subprocess safely from both a normal script and a frozen .exe."""
+    kwargs: dict = dict(
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        shell=shell,
+    )
+    if sys.platform == "win32":
+        kwargs["creationflags"] = _DETACHED | subprocess.CREATE_NEW_PROCESS_GROUP
+    return subprocess.Popen(cmd, **kwargs)
 
 WEB_APPLICATIONS: dict[str, str] = {
     "youtube": "https://www.youtube.com",
@@ -107,42 +128,58 @@ def open_application(name: str) -> dict[str, str]:
             browser_exe = find_browser_executable("chrome")
             if browser_exe:
                 try:
-                    subprocess.Popen([browser_exe, url])
+                    os.startfile(browser_exe, arguments=url)
                     return {"status": "success", "message": f"Opened {web_key.title()} ({url}) in {os.path.basename(browser_exe)}."}
                 except Exception:
-                    pass
-            webbrowser.open(url)
-            return {"status": "success", "message": f"Opened {web_key.title()} ({url}) in default browser."}
+                    try:
+                        _safe_popen([browser_exe, url])
+                        return {"status": "success", "message": f"Opened {web_key.title()} ({url}) in {os.path.basename(browser_exe)}."}
+                    except Exception:
+                        pass
+            try:
+                os.startfile(url)
+                return {"status": "success", "message": f"Opened {web_key.title()} ({url}) in default browser."}
+            except Exception:
+                webbrowser.open(url)
+                return {"status": "success", "message": f"Opened {web_key.title()} ({url}) in default browser."}
 
     # 2. Check if the app is Chrome or Edge specifically
     if any(alias in clean_name for alias in ["chrome", "google chrome"]):
         chrome_exe = find_browser_executable("chrome")
         if chrome_exe:
             try:
-                subprocess.Popen([chrome_exe])
+                os.startfile(chrome_exe)
                 return {"status": "success", "message": f"Opened Google Chrome ({chrome_exe})."}
-            except Exception as e:
-                return {"status": "error", "message": f"Failed to start Chrome: {e}"}
+            except Exception:
+                try:
+                    _safe_popen([chrome_exe])
+                    return {"status": "success", "message": f"Opened Google Chrome ({chrome_exe})."}
+                except Exception as e:
+                    return {"status": "error", "message": f"Failed to start Chrome: {e}"}
 
     if any(alias in clean_name for alias in ["edge", "microsoft edge"]):
         edge_exe = find_browser_executable("edge")
         if edge_exe:
             try:
-                subprocess.Popen([edge_exe])
+                os.startfile(edge_exe)
                 return {"status": "success", "message": f"Opened Microsoft Edge ({edge_exe})."}
-            except Exception as e:
-                return {"status": "error", "message": f"Failed to start Edge: {e}"}
+            except Exception:
+                try:
+                    _safe_popen([edge_exe])
+                    return {"status": "success", "message": f"Opened Microsoft Edge ({edge_exe})."}
+                except Exception as e:
+                    return {"status": "error", "message": f"Failed to start Edge: {e}"}
 
     # 3. Check known registered desktop apps
     app = _resolve_application(name)
     if app and "command" in app:
         try:
-            subprocess.Popen(app["command"], shell=app.get("shell", True))
+            _safe_popen(app["command"], shell=app.get("shell", True))
             return {"status": "success", "message": f"Opened {name}."}
         except FileNotFoundError:
             fallback = app.get("fallback")
             if fallback:
-                subprocess.Popen(fallback, shell=True)
+                _safe_popen(fallback, shell=True)
                 return {"status": "success", "message": f"Opened {name} (fallback)."}
             return {"status": "error", "message": f"Could not find {name} on this system."}
         except OSError as exc:
@@ -150,7 +187,7 @@ def open_application(name: str) -> dict[str, str]:
 
     # 4. Fallback: try Windows 'start' command with empty title parameter
     try:
-        subprocess.Popen(["start", "", name], shell=True)
+        _safe_popen(["start", "", name], shell=True)
         return {"status": "success", "message": f"Launched application '{name}'."}
     except OSError as exc:
         return {"status": "error", "message": f"Failed to open {name}: {exc}"}

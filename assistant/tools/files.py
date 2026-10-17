@@ -155,7 +155,8 @@ def open_in_vscode(path: str) -> dict[str, str]:
         resolved = ensure_within_home(resolve_path(path))
         if not resolved.exists():
             return {"status": "error", "message": f"Path not found: {resolved}"}
-        subprocess.Popen(["code", str(resolved)], shell=True)
+        from assistant.tools.applications import _safe_popen
+        _safe_popen(["code", str(resolved)], shell=True)
         return {"status": "success", "message": f"Opened in VS Code: {resolved}"}
     except (OSError, PermissionError, ValueError) as exc:
         return {"status": "error", "message": str(exc)}

@@ -13,8 +13,11 @@ import urllib.request
 import webbrowser
 from pathlib import Path
 
-# Add project root to sys.path
-PROJECT_ROOT = Path(__file__).resolve().parent
+if getattr(sys, "frozen", False):
+    PROJECT_ROOT = Path(sys.executable).resolve().parent
+else:
+    PROJECT_ROOT = Path(__file__).resolve().parent
+
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -83,16 +86,27 @@ def main():
 
     if browser_exe:
         # Launch dedicated borderless application window
+        profile_dir = PROJECT_ROOT / "data" / "webview_profile"
+        profile_dir.mkdir(parents=True, exist_ok=True)
         args = [
             browser_exe,
             f"--app={app_url}",
             "--window-size=1280,840",
-            f"--user-data-dir={PROJECT_ROOT / 'data' / 'webview_profile'}",
+            f"--user-data-dir={profile_dir}",
         ]
         try:
-            proc = subprocess.Popen(args)
+            proc = subprocess.Popen(
+                args,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            start_time = time.time()
             proc.wait()
-            sys.exit(0)
+            # If the user kept the dedicated window open for more than 10 seconds and then closed it, exit cleanly.
+            # Otherwise (delegated to an existing Edge/Chrome background process or exited quickly), keep server alive!
+            if time.time() - start_time >= 10.0:
+                sys.exit(0)
         except Exception:
             webbrowser.open(app_url)
     else:

@@ -39,10 +39,23 @@ def speak(text: str) -> dict[str, str]:
     if not text.strip():
         return {"status": "error", "message": "Nothing to speak."}
     try:
-        engine = _get_engine()
+        import sys
+        if sys.platform == "win32":
+            try:
+                import pythoncom
+                pythoncom.CoInitialize()
+            except Exception:
+                pass
+
+        engine = pyttsx3.init()
+        engine.setProperty("rate", 175)
         _select_voice_for_text(engine, text)
         engine.say(text)
         engine.runAndWait()
+        try:
+            engine.stop()
+        except Exception:
+            pass
         preview = text[:80] + ("..." if len(text) > 80 else "")
         return {"status": "success", "message": f"Spoke: {preview}"}
     except Exception as exc:  # noqa: BLE001

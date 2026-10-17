@@ -24,6 +24,21 @@ def get_model() -> str:
     return OLLAMA_MODEL
 
 
+import httpx
+
+_shared_http_client: httpx.Client | None = None
+
+
+def get_http_client() -> httpx.Client:
+    global _shared_http_client
+    if _shared_http_client is None or _shared_http_client.is_closed:
+        _shared_http_client = httpx.Client(
+            timeout=httpx.Timeout(30.0, connect=8.0),
+            limits=httpx.Limits(max_keepalive_connections=10, max_connections=20, keepalive_expiry=60.0),
+        )
+    return _shared_http_client
+
+
 def create_client() -> OpenAI:
     # Development: allow a `mock` provider for fast local responses
     if os.getenv("LLM_PROVIDER", "").lower() == "mock":
@@ -45,12 +60,14 @@ def create_client() -> OpenAI:
         mock_client.chat = SimpleNamespace(completions=_MockCompletions())
         return mock_client
 
+    http_client = get_http_client()
+
     if LLM_PROVIDER == "openai":
         if not OPENAI_API_KEY:
             raise ValueError(
                 "LLM_PROVIDER=openai but OPENAI_API_KEY is not set in .env"
             )
-        return OpenAI(api_key=OPENAI_API_KEY)
+        return OpenAI(api_key=OPENAI_API_KEY, http_client=http_client)
 
     if LLM_PROVIDER == "groq":
         if not GROQ_API_KEY:
@@ -61,12 +78,14 @@ def create_client() -> OpenAI:
         return OpenAI(
             api_key=GROQ_API_KEY,
             base_url="https://api.groq.com/openai/v1",
+            http_client=http_client,
         )
 
     # Default: Ollama (local, no API key needed)
     return OpenAI(
         api_key="ollama",
         base_url=OLLAMA_BASE_URL,
+        http_client=http_client,
     )
 
 
